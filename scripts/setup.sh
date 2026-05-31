@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# ezcreate — first-time setup (macOS / Linux / Git Bash)
+# ezcreate - first-time setup (Linux; macOS delegates to setup-mac.sh)
 # Run from repo root:  ./scripts/setup.sh
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  exec "$SCRIPT_DIR/setup-mac.sh" "$@"
+fi
+
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
 echo ""
-echo "ezcreate — first-time setup"
-echo "========================="
+echo "ezcreate - first-time setup (Linux)"
+echo "==================================="
 echo ""
 
 echo "[1/2] Checking Rust..."
@@ -23,7 +29,18 @@ echo "  $(rustc --version)"
 echo "  host: $(rustc -vV | awk '/^host: / { print $2 }')"
 
 echo ""
-echo "[2/2] Running cargo check (first compile can take a while)..."
+echo "[2/2] Checking C compiler..."
+if ! command -v cc >/dev/null 2>&1; then
+  echo "  cc not found. Install build tools, for example:"
+  echo "    Debian/Ubuntu:  sudo apt install build-essential"
+  echo "    Fedora:         sudo dnf groupinstall 'Development Tools'"
+  echo "    Arch:           sudo pacman -S base-devel"
+  exit 1
+fi
+echo "  $(cc --version | head -n1)"
+
+echo ""
+echo "Running cargo check (first compile can take a while)..."
 echo ""
 
 cargo check

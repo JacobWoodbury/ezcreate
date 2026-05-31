@@ -11,7 +11,8 @@ Townscaper-style modular building sandbox — Bevy port of the Godot **builder**
 | Platform | Command |
 |----------|---------|
 | **Windows** (PowerShell) | `.\scripts\setup.ps1` |
-| **macOS / Linux** | `./scripts/setup.sh` |
+| **macOS** (Terminal) | `chmod +x scripts/*.sh && ./scripts/setup-mac.sh` |
+| **Linux** | `chmod +x scripts/*.sh && ./scripts/setup.sh` |
 
 Then run:
 
@@ -25,7 +26,8 @@ First compile can take **10–30+ minutes**; later runs are much faster.
 
 - [Rust](https://rustup.rs) (stable)
 - **Windows:** [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with **Desktop development with C++** (provides `link.exe`)
-- **macOS:** Xcode command-line tools · **Linux:** `build-essential` or equivalent
+- **macOS:** Xcode Command Line Tools (`xcode-select --install`) — see [Getting started → macOS](docs/GETTING_STARTED.md#macos)
+- **Linux:** `build-essential` or equivalent
 
 ## Controls (short)
 
@@ -37,7 +39,7 @@ First compile can take **10–30+ minutes**; later runs are much faster.
 | Q / E | Rotate |
 | Del | Delete selection |
 | Alt + RMB | Delete block under cursor |
-| Ctrl+Z / Ctrl+Y | Undo / redo |
+| Ctrl+Z / Ctrl+Y | Undo / redo (macOS: **Control**, not Command) |
 | WASD + RMB drag + scroll | Camera |
 
 Rebind keys in **Settings → Keybindings**. Full list: [PORT.md](PORT.md).
@@ -49,7 +51,7 @@ Rebind keys in **Settings → Keybindings**. Full list: [PORT.md](PORT.md).
 | `src/` | Game code (Bevy plugins, systems, UI) |
 | `assets/mods/` | Built-in mod packs |
 | `docs/` | Formats, porting notes, **getting started** |
-| `scripts/` | `setup.ps1`, `setup.sh`, `run.ps1`, `run.sh` |
+| `scripts/` | `setup.ps1`, `setup-mac.sh`, `setup.sh`, `run.ps1`, `run.sh` |
 
 ## Mods
 
