@@ -1,6 +1,8 @@
 pub mod camera_orbit;
 pub mod input_router;
 pub mod paint;
+pub mod placeables;
+pub mod play;
 pub mod placement;
 pub mod raycast_util;
 pub mod selection;

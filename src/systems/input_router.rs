@@ -44,6 +44,9 @@ fn mode_hotkeys(
     if bindings.just_pressed(&keys, BindingId::ModePaint) {
         set_game_mode(&mut mode, &mut events, GameMode::Paint);
     }
+    if bindings.just_pressed(&keys, BindingId::ModePlay) {
+        set_game_mode(&mut mode, &mut events, GameMode::Play);
+    }
     if bindings.just_pressed(&keys, BindingId::TogglePlaceSelect) {
         let next = mode.toggle_place_select();
         set_game_mode(&mut mode, &mut events, next);
@@ -74,7 +77,7 @@ fn shift_toggle_place_select(
             let next = mode.toggle_place_select();
             set_game_mode(&mut mode, &mut events, next);
         }
-        GameMode::Paint => {}
+        GameMode::Paint | GameMode::Play => {}
     }
 }
 
@@ -85,7 +88,7 @@ fn on_mode_changed(
     mut commands: Commands,
     ghosts: Query<Entity, With<GhostPreview>>,
 ) {
-    for GameModeChanged { .. } in reader.read() {
+    for GameModeChanged { mode: new_mode } in reader.read() {
         paint.hover_hit = None;
         for ghost in &ghosts {
             commands.entity(ghost).despawn();
@@ -94,5 +97,8 @@ fn on_mode_changed(
         placement.anchor_cell = None;
         placement.ghost_pivot_world = None;
         placement.placement_allowed = false;
+        if *new_mode != GameMode::Play {
+            placement.clear_placeable();
+        }
     }
 }

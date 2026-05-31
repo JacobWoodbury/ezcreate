@@ -1,8 +1,13 @@
 use bevy::prelude::*;
 
-use crate::{components::OrbitCameraRig, resources::GamePreferences, ui::{GameplayAfterUi, UiInputCapture}};
+use crate::{
+    components::OrbitCameraRig,
+    resources::GamePreferences,
+    systems::play::play_session_inactive,
+    ui::{GameplayAfterUi, UiInputCapture},
+};
 
-#[derive(Component)]
+#[derive(Component, Clone, Debug)]
 pub struct OrbitCameraState {
     pub rotation: Vec2,
     pub zoom: f32,
@@ -13,9 +18,13 @@ pub struct OrbitCameraPlugin;
 
 impl Plugin for OrbitCameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, orbit_apply)
-            .add_systems(PostUpdate, orbit_mouse_input.in_set(GameplayAfterUi))
-            .add_systems(PostUpdate, orbit_keyboard_pan.in_set(GameplayAfterUi));
+        app.add_systems(Update, orbit_apply.run_if(play_session_inactive))
+            .add_systems(
+                PostUpdate,
+                (orbit_mouse_input, orbit_keyboard_pan)
+                    .in_set(GameplayAfterUi)
+                    .run_if(play_session_inactive),
+            );
     }
 }
 

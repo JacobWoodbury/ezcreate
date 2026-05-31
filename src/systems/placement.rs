@@ -99,6 +99,10 @@ fn update_placement_target(
     block_globals: Query<&GlobalTransform, With<PlacedBlock>>,
     ground: Query<Entity, With<Ground>>,
 ) {
+    if *mode == GameMode::Play && placement.selected_placeable.is_some() {
+        return;
+    }
+
     placement.anchor_cell = None;
     placement.ghost_pivot_world = None;
     placement.placement_allowed = false;
@@ -193,6 +197,10 @@ fn sync_ghost_preview(
     mut materials: ResMut<Assets<StandardMaterial>>,
     ghosts: Query<Entity, With<GhostPreview>>,
 ) {
+    if *mode == GameMode::Play && placement.selected_placeable.is_some() {
+        return;
+    }
+
     let show = *mode == GameMode::Place
         && placement.selected_item.is_some()
         && placement.anchor_cell.is_some();

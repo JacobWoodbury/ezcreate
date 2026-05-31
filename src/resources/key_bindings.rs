@@ -15,6 +15,7 @@ pub enum BindingId {
     ModePlace,
     ModeSelect,
     ModePaint,
+    ModePlay,
     TogglePlaceSelect,
     RotateCcw,
     RotateCw,
@@ -24,10 +25,11 @@ pub enum BindingId {
 }
 
 impl BindingId {
-    pub const ALL: [BindingId; 9] = [
+    pub const ALL: [BindingId; 10] = [
         BindingId::ModePlace,
         BindingId::ModeSelect,
         BindingId::ModePaint,
+        BindingId::ModePlay,
         BindingId::TogglePlaceSelect,
         BindingId::RotateCcw,
         BindingId::RotateCw,
@@ -41,6 +43,7 @@ impl BindingId {
             BindingId::ModePlace => "Place mode",
             BindingId::ModeSelect => "Select mode",
             BindingId::ModePaint => "Paint mode",
+            BindingId::ModePlay => "Play mode",
             BindingId::TogglePlaceSelect => "Toggle Place / Select",
             BindingId::RotateCcw => "Rotate selection / placement (−90° Y)",
             BindingId::RotateCw => "Rotate selection / placement (+90° Y)",
@@ -65,6 +68,7 @@ pub struct KeyBindings {
     pub mode_place: KeyCode,
     pub mode_select: KeyCode,
     pub mode_paint: KeyCode,
+    pub mode_play: KeyCode,
     pub toggle_place_select: KeyCode,
     pub rotate_ccw: KeyCode,
     pub rotate_cw: KeyCode,
@@ -79,6 +83,7 @@ impl Default for KeyBindings {
             mode_place: KeyCode::Digit1,
             mode_select: KeyCode::Digit2,
             mode_paint: KeyCode::Digit3,
+            mode_play: KeyCode::Digit4,
             toggle_place_select: KeyCode::Tab,
             rotate_ccw: KeyCode::KeyQ,
             rotate_cw: KeyCode::KeyE,
@@ -95,6 +100,7 @@ impl KeyBindings {
             BindingId::ModePlace => self.mode_place,
             BindingId::ModeSelect => self.mode_select,
             BindingId::ModePaint => self.mode_paint,
+            BindingId::ModePlay => self.mode_play,
             BindingId::TogglePlaceSelect => self.toggle_place_select,
             BindingId::RotateCcw => self.rotate_ccw,
             BindingId::RotateCw => self.rotate_cw,
@@ -109,6 +115,7 @@ impl KeyBindings {
             BindingId::ModePlace => self.mode_place = key,
             BindingId::ModeSelect => self.mode_select = key,
             BindingId::ModePaint => self.mode_paint = key,
+            BindingId::ModePlay => self.mode_play = key,
             BindingId::TogglePlaceSelect => self.toggle_place_select = key,
             BindingId::RotateCcw => self.rotate_ccw = key,
             BindingId::RotateCw => self.rotate_cw = key,

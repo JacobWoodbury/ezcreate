@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::content::{LibraryItemRef, SectionBlueprintFile};
+use crate::resources::PlaceableId;
 
 /// Resolved once when a library item with `sectionSpecPath` is selected.
 #[derive(Clone)]
@@ -11,6 +12,8 @@ pub struct ActiveSection {
 #[derive(Resource)]
 pub struct PlacementState {
     pub selected_item: Option<LibraryItemRef>,
+    /// Selected placeable in Play mode (characters, NPCs, …). Mutually exclusive with `selected_item`.
+    pub selected_placeable: Option<PlaceableId>,
     /// Set when the selected item has a `sectionSpecPath`.
     pub active_section: Option<ActiveSection>,
     pub placement_euler: Vec3,
@@ -27,6 +30,7 @@ impl Default for PlacementState {
     fn default() -> Self {
         Self {
             selected_item: None,
+            selected_placeable: None,
             active_section: None,
             placement_euler: Vec3::ZERO,
             anchor_cell: None,
@@ -55,5 +59,21 @@ impl PlacementState {
     pub fn rotate_yaw_reverse(&mut self) {
         self.placement_euler.y -= std::f32::consts::FRAC_PI_2;
         self.snap_placement_euler();
+    }
+
+    pub fn select_block_item(&mut self, item: LibraryItemRef) {
+        self.selected_item = Some(item);
+        self.selected_placeable = None;
+        self.active_section = None;
+    }
+
+    pub fn select_placeable(&mut self, id: PlaceableId) {
+        self.selected_placeable = Some(id);
+        self.selected_item = None;
+        self.active_section = None;
+    }
+
+    pub fn clear_placeable(&mut self) {
+        self.selected_placeable = None;
     }
 }

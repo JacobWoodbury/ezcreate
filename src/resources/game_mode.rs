@@ -6,6 +6,7 @@ pub enum GameMode {
     Place,
     Select,
     Paint,
+    Play,
 }
 
 impl GameMode {
@@ -14,6 +15,7 @@ impl GameMode {
             GameMode::Place => "Place",
             GameMode::Select => "Select",
             GameMode::Paint => "Paint",
+            GameMode::Play => "Play",
         }
     }
 
@@ -21,7 +23,7 @@ impl GameMode {
         match self {
             GameMode::Place => GameMode::Select,
             GameMode::Select => GameMode::Place,
-            GameMode::Paint => self,
+            GameMode::Paint | GameMode::Play => self,
         }
     }
 }

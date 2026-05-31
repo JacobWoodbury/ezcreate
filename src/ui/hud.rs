@@ -10,8 +10,8 @@ use crate::{
     },
     resources::{
         set_game_mode, AppScreen, GameMode, GameModeChanged, GamePreferences, GridConfig,
-        KeyBindings, PaintState, PlacementState, RecentPicks, SelectionState, StampPainter,
-        UndoStack,
+        KeyBindings, PaintState, PlacementState, PlaceableRegistry, PlaySession, PlayUiActions,
+        PlayWorldState, RecentPicks, SelectionState, StampPainter, UndoStack,
     },
     systems::{
         paint::delete_face_decal_with_undo,
@@ -31,6 +31,32 @@ struct HudWorldActions<'w, 's> {
     undo: ResMut<'w, UndoStack>,
     blocks: Query<'w, 's, (Entity, &'static PlacedBlock, &'static GlobalTransform)>,
     decals: Query<'w, 's, (Entity, &'static FacePaintDecal)>,
+}
+
+#[derive(SystemParam)]
+struct HudBuilderState<'w> {
+    mode: ResMut<'w, GameMode>,
+    mode_events: MessageWriter<'w, GameModeChanged>,
+    grid: ResMut<'w, GridConfig>,
+    placement: ResMut<'w, PlacementState>,
+    paint: ResMut<'w, PaintState>,
+    stamp_painter: ResMut<'w, StampPainter>,
+    recent: ResMut<'w, RecentPicks>,
+    prefs: ResMut<'w, GamePreferences>,
+    bindings: ResMut<'w, KeyBindings>,
+    keys: Res<'w, ButtonInput<KeyCode>>,
+    selection: Res<'w, SelectionState>,
+    catalog: ResMut<'w, LibraryCatalog>,
+    thumbnails: ResMut<'w, ThumbnailCache>,
+    ui_state: ResMut<'w, UiState>,
+}
+
+#[derive(SystemParam)]
+struct HudPlayState<'w> {
+    session: Res<'w, PlaySession>,
+    play_world: Res<'w, PlayWorldState>,
+    play_actions: ResMut<'w, PlayUiActions>,
+    placeables: Res<'w, PlaceableRegistry>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -120,32 +146,37 @@ fn sync_ui_input_capture(
     mut contexts: EguiContexts,
     mut capture: ResMut<UiInputCapture>,
     screen: Res<AppScreen>,
+    session: Res<PlaySession>,
     ui_state: Res<UiState>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
-    UiInputCapture::sync(ctx, &screen, ui_state.show_settings, &mut capture);
+    UiInputCapture::sync(ctx, &screen, ui_state.show_settings, &session, &mut capture);
 }
 
 fn draw_hud(
     mut contexts: EguiContexts,
-    mut mode: ResMut<GameMode>,
-    mut mode_events: MessageWriter<GameModeChanged>,
-    mut grid: ResMut<GridConfig>,
-    mut placement: ResMut<PlacementState>,
-    mut paint: ResMut<PaintState>,
-    mut stamp_painter: ResMut<StampPainter>,
-    mut recent: ResMut<RecentPicks>,
-    mut prefs: ResMut<GamePreferences>,
-    mut bindings: ResMut<KeyBindings>,
-    keys: Res<ButtonInput<KeyCode>>,
-    selection: Res<SelectionState>,
-    mut catalog: ResMut<LibraryCatalog>,
-    mut thumbnails: ResMut<ThumbnailCache>,
-    mut ui_state: ResMut<UiState>,
+    editor: HudBuilderState,
     mut world: HudWorldActions,
+    mut play: HudPlayState,
 ) {
+    let HudBuilderState {
+        mut mode,
+        mut mode_events,
+        mut grid,
+        mut placement,
+        mut paint,
+        mut stamp_painter,
+        mut recent,
+        mut prefs,
+        mut bindings,
+        keys,
+        selection,
+        mut catalog,
+        mut thumbnails,
+        mut ui_state,
+    } = editor;
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
@@ -163,6 +194,9 @@ fn draw_hud(
             }
             if ui.selectable_label(*mode == GameMode::Paint, "Paint").clicked() {
                 set_game_mode(&mut mode, &mut mode_events, GameMode::Paint);
+            }
+            if ui.selectable_label(*mode == GameMode::Play, "Play").clicked() {
+                set_game_mode(&mut mode, &mut mode_events, GameMode::Play);
             }
             ui.separator();
             ui.checkbox(&mut grid.prevent_overlapping, "Prevent overlap");
@@ -199,6 +233,19 @@ fn draw_hud(
                 );
             });
         ui_state.show_settings = open;
+    }
+
+    if play.session.is_active() {
+        egui::TopBottomPanel::top("play_session_overlay").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.strong("Playing — Esc to exit");
+                ui.label("WASD move · Space jump · RMB look");
+            });
+        });
+        egui::TopBottomPanel::bottom("play_session_bottom").show(ctx, |ui| {
+            ui.label("Esc exits play session · character stays in world");
+        });
+        return;
     }
 
     let process_item = |ui: &mut egui::Ui,
@@ -271,6 +318,39 @@ fn draw_hud(
     // ── Left sidebar (library) ────────────────────────────────────────────────
     egui::SidePanel::left("library").default_width(260.0).show(ctx, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {
+            if *mode == GameMode::Play {
+                ui.heading("Place");
+                ui.label("Select a placeable, then click the ground to place it.");
+                for def in &play.placeables.items {
+                    let selected = placement
+                        .selected_placeable
+                        .as_ref()
+                        .is_some_and(|id| *id == def.id);
+                    if ui.selectable_label(selected, &def.label).clicked() {
+                        placement.select_placeable(def.id.clone());
+                    }
+                }
+                ui.add_space(8.0);
+                if play.play_world.active_character.is_some() {
+                    if ui.button("Remove character").clicked() {
+                        play.play_actions.remove_character = true;
+                    }
+                }
+                ui.add_space(8.0);
+                let has_character = play.play_world.active_character.is_some();
+                if has_character {
+                    if ui.button("▶ Play").clicked() {
+                        play.play_actions.start_session = true;
+                    }
+                } else {
+                    ui.add_enabled_ui(false, |ui| {
+                        let _ = ui.button("▶ Play");
+                    });
+                    ui.label("Place a character first.");
+                }
+                ui.separator();
+            }
+
             let mut module_to_delete: Option<LibraryItemRef> = None;
 
             if !recent.items.is_empty() {
@@ -287,8 +367,7 @@ fn draw_hud(
                         &mut thumbnails,
                     ) {
                         Some(LibraryRowAction::Select) => {
-                            placement.selected_item = Some(item.clone());
-                            placement.active_section = None;
+                            placement.select_block_item(item.clone());
                             placement.snap_placement_euler();
                             recent.push(item.clone());
                             set_game_mode(&mut mode, &mut mode_events, GameMode::Place);
@@ -315,8 +394,7 @@ fn draw_hud(
                         &mut thumbnails,
                     ) {
                         Some(LibraryRowAction::Select) => {
-                            placement.selected_item = Some(item.clone());
-                            placement.active_section = None;
+                            placement.select_block_item(item.clone());
                             placement.snap_placement_euler();
                             recent.push(item.clone());
                             set_game_mode(&mut mode, &mut mode_events, GameMode::Place);
@@ -425,6 +503,10 @@ fn draw_hud(
                             stamp_painter.apply_mode = true;
                         }
                     }
+                }
+                GameMode::Play => {
+                    ui.separator();
+                    ui.label("Select placeable · LMB on ground · ▶ Play · Esc to exit session");
                 }
             }
             ui.separator();

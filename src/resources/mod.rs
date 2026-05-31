@@ -4,6 +4,8 @@ mod key_bindings;
 mod grid_config;
 mod occupancy;
 mod paint_state;
+mod placeables;
+mod play_state;
 mod placement_state;
 mod preferences;
 mod recent_picks;
@@ -17,6 +19,11 @@ pub use key_bindings::{BindingId, GameInput, KeyBindings};
 pub use grid_config::GridConfig;
 pub use occupancy::OccupancyMap;
 pub use paint_state::{PaintFaceHit, PaintState};
+pub use placeables::{PlaceableDef, PlaceableId, PlaceableKind, PlaceableRegistry};
+pub use play_state::{
+    PlayCharacterId, PlayCharacterRegistry, PlaySession, PlaySessionSnapshot, PlaySessionStorage,
+    PlayUiActions, PlayWorldState, SpawnedCharacter,
+};
 pub use placement_state::{ActiveSection, PlacementState};
 pub use preferences::GamePreferences;
 pub use recent_picks::RecentPicks;
