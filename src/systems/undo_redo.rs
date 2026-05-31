@@ -84,6 +84,11 @@ fn apply_inverse(
         GridEdit::Delete { snapshot } => {
             respawn(commands, grid, occupancy, root, meshes, materials, snapshot);
         }
+        GridEdit::BulkPlace { snapshots } => {
+            for snapshot in snapshots {
+                despawn_at(commands, occupancy, blocks, snapshot.grid_key);
+            }
+        }
         GridEdit::BulkDelete { snapshots } => {
             for snapshot in snapshots {
                 respawn(commands, grid, occupancy, root, meshes, materials, snapshot);
@@ -113,6 +118,11 @@ fn apply_forward(
             respawn(commands, grid, occupancy, root, meshes, materials, snapshot);
         }
         GridEdit::Delete { snapshot } => despawn_at(commands, occupancy, blocks, snapshot.grid_key),
+        GridEdit::BulkPlace { snapshots } => {
+            for snapshot in snapshots {
+                respawn(commands, grid, occupancy, root, meshes, materials, snapshot);
+            }
+        }
         GridEdit::BulkDelete { snapshots } => {
             for snapshot in snapshots {
                 despawn_at(commands, occupancy, blocks, snapshot.grid_key);

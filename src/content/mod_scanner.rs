@@ -12,6 +12,8 @@ pub struct LibraryItemRef {
     pub item_id: String,
     pub display_name: String,
     pub scene_path: String,
+    /// Relative path to the section blueprint JSON (from manifest_dir), if this is a section item.
+    pub section_spec_path: Option<String>,
     pub manifest_dir: PathBuf,
 }
 
@@ -107,6 +109,7 @@ fn load_manifest(
             item_id: item.id,
             display_name: item.display_name,
             scene_path: item.scene_path,
+            section_spec_path: item.section_spec_path,
             manifest_dir: manifest_dir.to_path_buf(),
         });
     }

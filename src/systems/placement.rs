@@ -4,26 +4,74 @@ use bevy_egui::EguiContexts;
 
 use crate::{
     components::{GhostPreview, PlacedBlock, PlacedRoot},
-    content::LibraryCatalog,
+    content::SectionBlueprintFile,
     resources::{
-        GameMode, GridConfig, GridEdit, OccupancyMap, PlacementState, PlacedBlockSnapshot, UndoStack,
+        ActiveSection, GameMode, GridConfig, GridEdit, OccupancyMap, PlacementState,
+        PlacedBlockSnapshot, UndoStack,
     },
+    systems::raycast_util::{cursor_ray, raycast_placed_block},
 };
 
 pub struct PlacementPlugin;
 
 impl Plugin for PlacementPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                update_placement_target,
-                sync_ghost_preview,
-                handle_place_and_delete,
-            )
-                .chain(),
-        );
+        app.add_systems(Update, resolve_selected_section)
+            .add_systems(Update, update_placement_target)
+            .add_systems(Update, sync_ghost_preview)
+            .add_systems(Update, handle_place_and_delete);
     }
+}
+
+/// When the selected library item changes to one with a sectionSpecPath, load the JSON.
+fn resolve_selected_section(mut placement: ResMut<PlacementState>) {
+    let Some(ref item) = placement.selected_item else {
+        placement.active_section = None;
+        return;
+    };
+
+    let spec_rel = match item.section_spec_path.as_deref() {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            placement.active_section = None;
+            return;
+        }
+    };
+
+    // Already resolved for this spec.
+    if let Some(ref existing) = placement.active_section {
+        let _ = existing;
+        return;
+    }
+
+    let spec_path = item.manifest_dir.join(&spec_rel);
+    let Ok(text) = std::fs::read_to_string(&spec_path) else {
+        warn!("Section spec not found: {}", spec_path.display());
+        placement.active_section = None;
+        return;
+    };
+    let Ok(blueprint) = serde_json::from_str::<SectionBlueprintFile>(&text) else {
+        warn!("Could not parse section spec: {}", spec_path.display());
+        placement.active_section = None;
+        return;
+    };
+
+    let count = blueprint.pieces.len() as f32;
+    let centroid_offset = if count > 0.0 {
+        let sum: Vec3 = blueprint
+            .pieces
+            .iter()
+            .map(|p| Vec3::new(p.offset[0] as f32, p.offset[1] as f32, p.offset[2] as f32))
+            .sum();
+        sum / count
+    } else {
+        Vec3::ZERO
+    };
+
+    placement.active_section = Some(ActiveSection {
+        blueprint,
+        centroid_offset,
+    });
 }
 
 fn update_placement_target(
@@ -35,6 +83,7 @@ fn update_placement_target(
     spatial_query: SpatialQuery,
     mut placement: ResMut<PlacementState>,
     occupancy: Res<OccupancyMap>,
+    placed_blocks: Query<Entity, With<PlacedBlock>>,
 ) {
     placement.anchor_cell = None;
     placement.placement_valid = false;
@@ -43,49 +92,68 @@ fn update_placement_target(
         return;
     }
 
-    if egui
-        .ctx_mut()
-        .is_ok_and(|ctx| ctx.is_pointer_over_area())
-    {
+    if egui.ctx_mut().is_ok_and(|ctx| ctx.is_pointer_over_area()) {
         return;
     }
 
     let Ok(window) = windows.single() else {
         return;
     };
-    let Some(cursor) = window.cursor_position() else {
-        return;
-    };
     let Ok((camera, cam_transform)) = cameras.single() else {
         return;
     };
-    let Ok(ray) = camera.viewport_to_world(cam_transform, cursor) else {
+    let Some(ray) = cursor_ray(window, camera, cam_transform) else {
         return;
     };
 
+    // Allow hitting both ground and blocks so placement always has a surface.
     let Ok(dir) = Dir3::new(ray.direction.normalize()) else {
         return;
     };
-
-    let filter = SpatialQueryFilter::default();
-    let Some(hit) = spatial_query.cast_ray(
-        ray.origin,
-        dir,
-        grid.ray_length,
-        true,
-        &filter,
-    ) else {
+    let Some(hit) = spatial_query.cast_ray(ray.origin, dir, grid.ray_length, true, &SpatialQueryFilter::default())
+    else {
         return;
     };
 
-    let half = grid.grid_size * 0.5;
     let hit_pos = ray.origin + *ray.direction * hit.distance;
-    let world = hit_pos + hit.normal * half;
+    let world = hit_pos + hit.normal * (grid.grid_size * 0.5);
     let snapped = grid.snap_to_grid(world);
     let cell = grid.world_to_grid(snapped);
 
     placement.anchor_cell = Some(cell);
-    placement.placement_valid = check_placement_valid(&grid, &occupancy, cell);
+    placement.placement_valid = section_footprint_valid(&placement, &grid, &occupancy, cell);
+
+    let _ = placed_blocks;
+}
+
+fn section_footprint_valid(
+    placement: &PlacementState,
+    grid: &GridConfig,
+    occupancy: &OccupancyMap,
+    anchor: IVec3,
+) -> bool {
+    if !grid.prevent_overlapping {
+        return true;
+    }
+    if let Some(ref section) = placement.active_section {
+        let yaw = placement.placement_euler.y;
+        let rotation = Quat::from_rotation_y(yaw);
+        for piece in &section.blueprint.pieces {
+            let local = Vec3::new(
+                piece.offset[0] as f32,
+                piece.offset[1] as f32,
+                piece.offset[2] as f32,
+            ) - section.centroid_offset;
+            let rotated = rotation * local + section.centroid_offset;
+            let cell = anchor + grid.world_to_grid(rotated * grid.grid_size);
+            if occupancy.contains(cell) {
+                return false;
+            }
+        }
+        true
+    } else {
+        !occupancy.contains(anchor)
+    }
 }
 
 fn sync_ghost_preview(
@@ -109,47 +177,65 @@ fn sync_ghost_preview(
         return;
     }
 
-    let cell = placement.anchor_cell.unwrap();
-    let world = grid.grid_to_world(cell);
-    let rotation = Quat::from_euler(
-        EulerRot::XYZ,
-        placement.placement_euler.x,
-        placement.placement_euler.y,
-        placement.placement_euler.z,
-    );
+    // Always rebuild when state changes — despawn old first.
+    for entity in &ghosts {
+        commands.entity(entity).despawn();
+    }
+    placement.ghost_entity = None;
 
-    let color = if placement.placement_valid {
+    let cell = placement.anchor_cell.unwrap();
+    let anchor_world = grid.grid_to_world(cell);
+    let yaw = placement.placement_euler.y;
+    let rotation = Quat::from_rotation_y(yaw);
+
+    let ghost_color = if placement.placement_valid {
         Color::srgba(0.35, 0.85, 0.45, 0.45)
     } else {
         Color::srgba(0.9, 0.25, 0.2, 0.45)
     };
 
-    if let Some(entity) = placement.ghost_entity {
-        if let Ok(mut entity_cmds) = commands.get_entity(entity) {
-            entity_cmds.insert((
-                Transform::from_translation(world).with_rotation(rotation),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: color,
-                    unlit: true,
-                    alpha_mode: AlphaMode::Blend,
-                    ..default()
-                })),
+    let ghost_material = materials.add(StandardMaterial {
+        base_color: ghost_color,
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+
+    if let Some(ref section) = placement.active_section.clone() {
+        // Section ghost: pivot at centroid, pieces around it.
+        let centroid = section.centroid_offset * grid.grid_size;
+        let pivot = commands
+            .spawn((
+                GhostPreview,
+                Transform::from_translation(anchor_world).with_rotation(rotation),
+            ))
+            .id();
+
+        for piece in &section.blueprint.pieces {
+            let local_offset = Vec3::new(
+                piece.offset[0] as f32,
+                piece.offset[1] as f32,
+                piece.offset[2] as f32,
+            ) * grid.grid_size
+                - centroid;
+            let mesh = meshes.add(Cuboid::new(grid.grid_size, grid.grid_size, grid.grid_size));
+            commands.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(ghost_material.clone()),
+                Transform::from_translation(local_offset),
+                ChildOf(pivot),
             ));
         }
+        placement.ghost_entity = Some(pivot);
     } else {
+        // Single-block ghost.
         let mesh = meshes.add(Cuboid::new(grid.grid_size, grid.grid_size, grid.grid_size));
-        let material = materials.add(StandardMaterial {
-            base_color: color,
-            unlit: true,
-            alpha_mode: AlphaMode::Blend,
-            ..default()
-        });
         let entity = commands
             .spawn((
                 GhostPreview,
                 Mesh3d(mesh),
-                MeshMaterial3d(material),
-                Transform::from_translation(world).with_rotation(rotation),
+                MeshMaterial3d(ghost_material),
+                Transform::from_translation(anchor_world).with_rotation(rotation),
             ))
             .id();
         placement.ghost_entity = Some(entity);
@@ -160,7 +246,6 @@ fn handle_place_and_delete(
     mut commands: Commands,
     mode: Res<GameMode>,
     grid: Res<GridConfig>,
-    _catalog: Res<LibraryCatalog>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut placement: ResMut<PlacementState>,
@@ -168,6 +253,7 @@ fn handle_place_and_delete(
     mut undo: ResMut<UndoStack>,
     placed_root: Query<Entity, With<PlacedRoot>>,
     blocks: Query<(Entity, &PlacedBlock, &GlobalTransform)>,
+    block_entities: Query<Entity, With<PlacedBlock>>,
     spatial_query: SpatialQuery,
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -191,41 +277,48 @@ fn handle_place_and_delete(
         && mouse.just_pressed(MouseButton::Left)
         && placement.placement_valid
     {
-        if let (Some(cell), Some(item)) = (placement.anchor_cell, placement.selected_item.clone()) {
-            if grid.prevent_overlapping && occupancy.contains(cell) {
-                return;
-            }
-
-            let world = grid.grid_to_world(cell);
-            let rotation = Quat::from_euler(
-                EulerRot::XYZ,
-                placement.placement_euler.x,
-                placement.placement_euler.y,
-                placement.placement_euler.z,
-            );
-
-            let entity = spawn_block(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                root,
-                &item.item_id,
-                &item.scene_path,
-                cell,
-                world,
-                rotation,
-                grid.grid_size,
-            );
-            occupancy.insert(cell, entity);
-
-            undo.push(GridEdit::Place {
-                snapshot: PlacedBlockSnapshot {
-                    item_id: item.item_id,
-                    grid_key: cell,
+        if let Some(cell) = placement.anchor_cell {
+            if let Some(ref section) = placement.active_section.clone() {
+                place_section(
+                    &mut commands,
+                    &grid,
+                    &mut occupancy,
+                    &mut undo,
+                    &mut meshes,
+                    &mut materials,
+                    root,
+                    cell,
+                    placement.placement_euler.y,
+                    section,
+                );
+            } else if let Some(item) = placement.selected_item.clone() {
+                if grid.prevent_overlapping && occupancy.contains(cell) {
+                    return;
+                }
+                let world = grid.grid_to_world(cell);
+                let rotation = Quat::from_rotation_y(placement.placement_euler.y);
+                let entity = spawn_block(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    root,
+                    &item.item_id,
+                    &item.scene_path,
+                    cell,
+                    world,
                     rotation,
-                    scene_path: item.scene_path,
-                },
-            });
+                    grid.grid_size,
+                );
+                occupancy.insert(cell, entity);
+                undo.push(GridEdit::Place {
+                    snapshot: PlacedBlockSnapshot {
+                        item_id: item.item_id,
+                        grid_key: cell,
+                        rotation,
+                        scene_path: item.scene_path,
+                    },
+                });
+            }
         }
     }
 
@@ -234,10 +327,7 @@ fn handle_place_and_delete(
 
     if delete_pressed {
         let Some(cell) = raycast_cell_under_cursor(
-            &grid,
-            &windows,
-            &cameras,
-            &spatial_query,
+            &grid, &windows, &cameras, &spatial_query, &block_entities,
         ) else {
             return;
         };
@@ -255,6 +345,63 @@ fn handle_place_and_delete(
                 undo.push(GridEdit::Delete { snapshot });
             }
         }
+    }
+}
+
+fn place_section(
+    commands: &mut Commands,
+    grid: &GridConfig,
+    occupancy: &mut OccupancyMap,
+    undo: &mut UndoStack,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    root: Entity,
+    anchor: IVec3,
+    yaw: f32,
+    section: &ActiveSection,
+) {
+    let rotation = Quat::from_rotation_y(yaw);
+    let centroid = section.centroid_offset * grid.grid_size;
+    let anchor_world = grid.grid_to_world(anchor);
+    let mut snapshots = Vec::new();
+
+    for piece in &section.blueprint.pieces {
+        let local_offset = Vec3::new(
+            piece.offset[0] as f32,
+            piece.offset[1] as f32,
+            piece.offset[2] as f32,
+        ) * grid.grid_size
+            - centroid;
+        let world_pos = anchor_world + rotation * local_offset;
+        let cell = grid.world_to_grid(world_pos);
+
+        if grid.prevent_overlapping && occupancy.contains(cell) {
+            continue;
+        }
+
+        let entity = spawn_block(
+            commands,
+            meshes,
+            materials,
+            root,
+            &piece.item_id,
+            &piece.scene_path,
+            cell,
+            world_pos,
+            rotation,
+            grid.grid_size,
+        );
+        occupancy.insert(cell, entity);
+        snapshots.push(PlacedBlockSnapshot {
+            item_id: piece.item_id.clone(),
+            grid_key: cell,
+            rotation,
+            scene_path: piece.scene_path.clone(),
+        });
+    }
+
+    if !snapshots.is_empty() {
+        undo.push(GridEdit::BulkPlace { snapshots });
     }
 }
 
@@ -298,19 +445,12 @@ fn raycast_cell_under_cursor(
     windows: &Query<&Window>,
     cameras: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     spatial_query: &SpatialQuery,
+    blocks: &Query<Entity, With<PlacedBlock>>,
 ) -> Option<IVec3> {
     let window = windows.single().ok()?;
-    let cursor = window.cursor_position()?;
     let (camera, cam_transform) = cameras.single().ok()?;
-    let ray = camera.viewport_to_world(cam_transform, cursor).ok()?;
-    let dir = Dir3::new(ray.direction.normalize()).ok()?;
-    let hit = spatial_query.cast_ray(
-        ray.origin,
-        dir,
-        grid.ray_length,
-        true,
-        &SpatialQueryFilter::default(),
-    )?;
+    let ray = cursor_ray(window, camera, cam_transform)?;
+    let hit = raycast_placed_block(spatial_query, blocks, ray.origin, *ray.direction, grid.ray_length)?;
     let hit_pos = ray.origin + *ray.direction * hit.distance;
     let world = hit_pos + hit.normal * (grid.grid_size * 0.5);
     Some(grid.world_to_grid(grid.snap_to_grid(world)))

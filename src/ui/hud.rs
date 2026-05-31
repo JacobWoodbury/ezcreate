@@ -3,15 +3,21 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use crate::{
     content::{LibraryCatalog, register_grouped_module},
-    resources::{GameMode, GridConfig, PaintState, PlacementState, RecentPicks, SelectionState},
+    resources::{GameMode, GamePreferences, GridConfig, PaintState, PlacementState, RecentPicks, SelectionState},
 };
 
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(EguiPrimaryContextPass, draw_hud);
+        app.init_resource::<UiState>()
+            .add_systems(EguiPrimaryContextPass, draw_hud);
     }
+}
+
+#[derive(Resource, Default)]
+struct UiState {
+    show_settings: bool,
 }
 
 fn draw_hud(
@@ -21,14 +27,17 @@ fn draw_hud(
     mut placement: ResMut<PlacementState>,
     mut paint: ResMut<PaintState>,
     mut recent: ResMut<RecentPicks>,
+    mut prefs: ResMut<GamePreferences>,
     selection: Res<SelectionState>,
     mut catalog: ResMut<LibraryCatalog>,
+    mut ui_state: ResMut<UiState>,
     blocks: Query<(Entity, &crate::components::PlacedBlock, &GlobalTransform)>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
 
+    // ── Top bar ────────────────────────────────────────────────────────────────
     egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.label("ezcreate");
@@ -47,9 +56,48 @@ fn draw_hud(
             if *mode == GameMode::Select {
                 ui.label(format!("selected: {}", selection.selected.len()));
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("⚙ Settings").clicked() {
+                    ui_state.show_settings = !ui_state.show_settings;
+                }
+            });
         });
     });
 
+    // ── Settings window ────────────────────────────────────────────────────────
+    if ui_state.show_settings {
+        let mut open = ui_state.show_settings;
+        egui::Window::new("Settings")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(320.0)
+            .show(ctx, |ui| {
+                ui.heading("Placement");
+                ui.checkbox(&mut grid.prevent_overlapping, "Prevent block overlap");
+
+                ui.add_space(8.0);
+                ui.heading("Selection");
+                ui.checkbox(
+                    &mut prefs.select_mode_hold_shift,
+                    "Hold Shift for temporary Select mode",
+                );
+
+                ui.add_space(8.0);
+                ui.heading("Grid");
+                ui.horizontal(|ui| {
+                    ui.label("Grid size:");
+                    ui.add(egui::DragValue::new(&mut grid.grid_size).range(0.25..=8.0).speed(0.05));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Ray length:");
+                    ui.add(egui::DragValue::new(&mut grid.ray_length).range(10.0..=2000.0).speed(1.0));
+                });
+            });
+        ui_state.show_settings = open;
+    }
+
+    // ── Left sidebar (library) ────────────────────────────────────────────────
     egui::SidePanel::left("library").default_width(240.0).show(ctx, |ui| {
         if !recent.items.is_empty() {
             ui.heading("Recent");
@@ -60,6 +108,7 @@ fn draw_hud(
                     .is_some_and(|s| s.item_id == item.item_id);
                 if ui.selectable_label(selected, &item.display_name).clicked() {
                     placement.selected_item = Some(item.clone());
+                    placement.active_section = None;
                     placement.snap_placement_euler();
                     recent.push(item.clone());
                     *mode = GameMode::Place;
@@ -77,14 +126,18 @@ fn draw_hud(
                     .selected_item
                     .as_ref()
                     .is_some_and(|s| s.item_id == item.item_id);
-                if ui.selectable_label(selected, &item.display_name).clicked() {
+                let label = if item.section_spec_path.is_some() {
+                    format!("📦 {}", item.display_name)
+                } else {
+                    item.display_name.clone()
+                };
+                if ui.selectable_label(selected, &label).clicked() {
                     placement.selected_item = Some(item.clone());
+                    placement.active_section = None; // Will be resolved by resolve_selected_section.
                     placement.snap_placement_euler();
                     recent.push(item.clone());
                     *mode = GameMode::Place;
                 }
-                ui.label(format!("id: {}", item.item_id));
-                ui.separator();
             }
         }
 
@@ -106,6 +159,7 @@ fn draw_hud(
         }
     });
 
+    // ── Bottom bar ─────────────────────────────────────────────────────────────
     egui::TopBottomPanel::bottom("bottom_bar").show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.label(format!("Mode: {}", mode.label()));
@@ -122,6 +176,10 @@ fn draw_hud(
                         "yaw: {:.0}°",
                         placement.placement_euler.y.to_degrees()
                     ));
+                    if placement.selected_item.as_ref().and_then(|i| i.section_spec_path.as_deref()).is_some() {
+                        ui.separator();
+                        ui.label("📦 section");
+                    }
                 }
                 GameMode::Select => {
                     ui.separator();

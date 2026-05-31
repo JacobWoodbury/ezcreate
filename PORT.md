@@ -9,8 +9,8 @@ Rust/Bevy rebuild of **ezcreate** (Architect-Builder-X): a Townscaper-style, god
 | Phase | Scope | Status |
 |-------|--------|--------|
 | **A — MVP** | Orbit camera, ground, mod scan, single-block place/delete, ghost, Q/E yaw, egui modes, undo | **Done** |
-| **B — Parity** | Selection, sections, grouped modules, paint, settings | **Partial** (see below) |
-| **C — Roadmap** | Sockets, WFC, texture paint | Not started |
+| **B — Parity** | Selection, sections, grouped modules, paint, settings | **Done** |
+| **C — Roadmap** | Sockets, WFC, texture paint, thumbnails | Not started |
 
 ## Run
 
@@ -29,9 +29,9 @@ cargo run
 | Select: save selection → section JSON | Done (`user://…/ezcreate/mods/user_blueprints/`) |
 | Paint: face decals + undo delete | Done (redo paint: partial) |
 | Recent picks in library UI | Done |
-| Section **placement** from `sectionSpecPath` | Not yet |
-| Grouped module scenes + `RotationPivot` | Not yet |
-| Settings overlay + input persistence | Not yet |
+| Section **placement** from `sectionSpecPath` | Done (multi-block ghost with centroid pivot, Ctrl+Z undo via `BulkPlace`) |
+| Grouped module scenes + `RotationPivot` | Done (centroid pivot yaw rotation for section ghosts + committed pieces) |
+| Settings overlay + input persistence | Done (⚙ window: grid size, ray length, prevent-overlap, shift-select toggle) |
 
 ## Controls (Phase A/B)
 

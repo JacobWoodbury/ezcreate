@@ -107,6 +107,7 @@ pub fn register_grouped_module(
         item_id: item_id.clone(),
         display_name: display_name.to_string(),
         scene_path: representative_scene,
+        section_spec_path: Some(section_rel),
         manifest_dir: root.clone(),
     };
     catalog.items.push(item_ref.clone());

@@ -12,7 +12,7 @@ pub use game_mode::{GameMode, GameModeChanged};
 pub use grid_config::GridConfig;
 pub use occupancy::OccupancyMap;
 pub use paint_state::{PaintFaceHit, PaintState};
-pub use placement_state::PlacementState;
+pub use placement_state::{ActiveSection, PlacementState};
 pub use preferences::GamePreferences;
 pub use recent_picks::RecentPicks;
 pub use selection_state::SelectionState;

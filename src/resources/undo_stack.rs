@@ -23,6 +23,10 @@ pub enum GridEdit {
     Delete {
         snapshot: PlacedBlockSnapshot,
     },
+    /// Undo for section placement (all pieces placed together).
+    BulkPlace {
+        snapshots: Vec<PlacedBlockSnapshot>,
+    },
     BulkDelete {
         snapshots: Vec<PlacedBlockSnapshot>,
     },

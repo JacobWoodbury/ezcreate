@@ -1,13 +1,24 @@
 use bevy::prelude::*;
 
-use crate::content::LibraryItemRef;
+use crate::content::{LibraryItemRef, SectionBlueprintFile};
+
+/// Resolved once when a library item with `sectionSpecPath` is selected.
+#[derive(Clone)]
+pub struct ActiveSection {
+    pub blueprint: SectionBlueprintFile,
+    /// Resolved centroid offset (computed from the piece offsets, in grid cells).
+    pub centroid_offset: Vec3,
+}
 
 #[derive(Resource)]
 pub struct PlacementState {
     pub selected_item: Option<LibraryItemRef>,
+    /// Set when the selected item has a `sectionSpecPath`.
+    pub active_section: Option<ActiveSection>,
     pub placement_euler: Vec3,
     pub anchor_cell: Option<IVec3>,
     pub placement_valid: bool,
+    /// Root ghost entity (single block or section pivot).
     pub ghost_entity: Option<Entity>,
 }
 
@@ -15,6 +26,7 @@ impl Default for PlacementState {
     fn default() -> Self {
         Self {
             selected_item: None,
+            active_section: None,
             placement_euler: Vec3::ZERO,
             anchor_cell: None,
             placement_valid: false,
