@@ -1,8 +1,7 @@
 use bevy::prelude::*;
 
 use crate::{
-    components::PlacedBlock,
-    components::PlacedRoot,
+    components::{FacePaintDecal, PlacedBlock, PlacedRoot},
     resources::{GridConfig, GridEdit, OccupancyMap, PlacedBlockSnapshot, UndoStack},
     systems::placement::spawn_block,
 };
@@ -23,6 +22,7 @@ fn handle_undo_redo(
     mut occupancy: ResMut<OccupancyMap>,
     placed_root: Query<Entity, With<PlacedRoot>>,
     blocks: Query<Entity, With<PlacedBlock>>,
+    decals: Query<Entity, With<FacePaintDecal>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -37,42 +37,90 @@ fn handle_undo_redo(
 
     if keys.just_pressed(KeyCode::KeyZ) {
         if let Some(edit) = undo.pop_undo() {
-            match &edit {
-                GridEdit::Place { snapshot } => {
-                    despawn_at(&mut commands, &mut occupancy, &blocks, snapshot.grid_key);
-                }
-                GridEdit::Delete { snapshot } => {
-                    respawn(
-                        &mut commands,
-                        &grid,
-                        &mut occupancy,
-                        root,
-                        &mut meshes,
-                        &mut materials,
-                        snapshot.clone(),
-                    );
-                }
-            }
+            apply_inverse(
+                &mut commands,
+                &grid,
+                &mut occupancy,
+                &blocks,
+                &decals,
+                root,
+                &mut meshes,
+                &mut materials,
+                edit,
+            );
         }
     }
 
     if keys.just_pressed(KeyCode::KeyY) {
         if let Some(edit) = undo.pop_redo() {
-            match edit {
-                GridEdit::Place { snapshot } => {
-                    respawn(
-                        &mut commands,
-                        &grid,
-                        &mut occupancy,
-                        root,
-                        &mut meshes,
-                        &mut materials,
-                        snapshot,
-                    );
-                }
-                GridEdit::Delete { snapshot } => {
-                    despawn_at(&mut commands, &mut occupancy, &blocks, snapshot.grid_key);
-                }
+            apply_forward(
+                &mut commands,
+                &grid,
+                &mut occupancy,
+                &blocks,
+                &decals,
+                root,
+                &mut meshes,
+                &mut materials,
+                edit,
+            );
+        }
+    }
+}
+
+fn apply_inverse(
+    commands: &mut Commands,
+    grid: &GridConfig,
+    occupancy: &mut OccupancyMap,
+    blocks: &Query<Entity, With<PlacedBlock>>,
+    decals: &Query<Entity, With<FacePaintDecal>>,
+    root: Entity,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    edit: GridEdit,
+) {
+    match edit {
+        GridEdit::Place { snapshot } => despawn_at(commands, occupancy, blocks, snapshot.grid_key),
+        GridEdit::Delete { snapshot } => {
+            respawn(commands, grid, occupancy, root, meshes, materials, snapshot);
+        }
+        GridEdit::BulkDelete { snapshots } => {
+            for snapshot in snapshots {
+                respawn(commands, grid, occupancy, root, meshes, materials, snapshot);
+            }
+        }
+        GridEdit::FacePaint { snapshot } => {
+            if decals.get(snapshot.decal_entity).is_ok() {
+                commands.entity(snapshot.decal_entity).despawn();
+            }
+        }
+    }
+}
+
+fn apply_forward(
+    commands: &mut Commands,
+    grid: &GridConfig,
+    occupancy: &mut OccupancyMap,
+    blocks: &Query<Entity, With<PlacedBlock>>,
+    decals: &Query<Entity, With<FacePaintDecal>>,
+    root: Entity,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    edit: GridEdit,
+) {
+    match edit {
+        GridEdit::Place { snapshot } => {
+            respawn(commands, grid, occupancy, root, meshes, materials, snapshot);
+        }
+        GridEdit::Delete { snapshot } => despawn_at(commands, occupancy, blocks, snapshot.grid_key),
+        GridEdit::BulkDelete { snapshots } => {
+            for snapshot in snapshots {
+                despawn_at(commands, occupancy, blocks, snapshot.grid_key);
+            }
+        }
+        GridEdit::FacePaint { snapshot } => {
+            if decals.get(snapshot.decal_entity).is_ok() {
+                commands.entity(snapshot.decal_entity).despawn();
             }
         }
     }
@@ -110,6 +158,7 @@ fn respawn(
         materials,
         root,
         &snapshot.item_id,
+        &snapshot.scene_path,
         snapshot.grid_key,
         world,
         snapshot.rotation,

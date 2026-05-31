@@ -5,6 +5,14 @@ pub struct PlacedBlockSnapshot {
     pub item_id: String,
     pub grid_key: IVec3,
     pub rotation: Quat,
+    pub scene_path: String,
+}
+
+#[derive(Clone)]
+pub struct FacePaintSnapshot {
+    pub parent_block: Entity,
+    pub decal_entity: Entity,
+    pub color: Color,
 }
 
 #[derive(Clone)]
@@ -14,6 +22,12 @@ pub enum GridEdit {
     },
     Delete {
         snapshot: PlacedBlockSnapshot,
+    },
+    BulkDelete {
+        snapshots: Vec<PlacedBlockSnapshot>,
+    },
+    FacePaint {
+        snapshot: FacePaintSnapshot,
     },
 }
 

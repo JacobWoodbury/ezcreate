@@ -2,7 +2,7 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 
 use crate::{
-    components::{OrbitCameraRig, PlacedRoot},
+    components::{Ground, OrbitCameraRig, PlacedRoot},
     systems::camera_orbit::OrbitCameraState,
 };
 
@@ -29,6 +29,7 @@ fn setup_world(
     ));
 
     commands.spawn((
+        Ground,
         Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(50.0)))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.35, 0.42, 0.38),

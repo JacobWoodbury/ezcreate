@@ -1,6 +1,6 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ModManifest {
     pub id: String,
     pub name: String,
@@ -8,7 +8,7 @@ pub struct ModManifest {
     pub items: Vec<ModManifestItem>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ModManifestItem {
     pub id: String,
     #[serde(rename = "displayName")]

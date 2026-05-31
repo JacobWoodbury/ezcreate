@@ -1,5 +1,8 @@
 pub mod camera_orbit;
 pub mod input_router;
+pub mod paint;
 pub mod placement;
+pub mod raycast_util;
+pub mod selection;
 pub mod undo_redo;
 pub mod world_setup;

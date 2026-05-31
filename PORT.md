@@ -8,8 +8,8 @@ Rust/Bevy rebuild of **ezcreate** (Architect-Builder-X): a Townscaper-style, god
 
 | Phase | Scope | Status |
 |-------|--------|--------|
-| **A — MVP** | Orbit camera, ground, mod scan, single-block place/delete, ghost, Q/E yaw, egui modes, undo | **In progress** (scaffolded in this repo) |
-| **B — Parity** | Selection, sections, grouped modules, paint, settings | Not started |
+| **A — MVP** | Orbit camera, ground, mod scan, single-block place/delete, ghost, Q/E yaw, egui modes, undo | **Done** |
+| **B — Parity** | Selection, sections, grouped modules, paint, settings | **Partial** (see below) |
 | **C — Roadmap** | Sockets, WFC, texture paint | Not started |
 
 ## Run
@@ -18,7 +18,22 @@ Rust/Bevy rebuild of **ezcreate** (Architect-Builder-X): a Townscaper-style, god
 cargo run
 ```
 
-## Controls (Phase A)
+## Phase B progress
+
+| Feature | Status |
+|---------|--------|
+| Select: click + shift-toggle | Done |
+| Select: marquee (screen rect) | Done |
+| Select: highlight tint | Done |
+| Select: Delete / Q/E rotate group | Done |
+| Select: save selection → section JSON | Done (`user://…/ezcreate/mods/user_blueprints/`) |
+| Paint: face decals + undo delete | Done (redo paint: partial) |
+| Recent picks in library UI | Done |
+| Section **placement** from `sectionSpecPath` | Not yet |
+| Grouped module scenes + `RotationPivot` | Not yet |
+| Settings overlay + input persistence | Not yet |
+
+## Controls (Phase A/B)
 
 | Input | Action |
 |-------|--------|
@@ -29,10 +44,12 @@ cargo run
 | Tab | Toggle Place ↔ Select |
 | Shift (hold) | Temporary Select when `SelectModeHoldShift` is on |
 | Library click | Pick block |
-| LMB | Place (Place mode) |
-| Alt + RMB | Delete block |
-| Q / E | Rotate placement yaw |
-| Ctrl+Z / Ctrl+Y | Undo / redo place & delete |
+| LMB | Place (Place) / select (Select) / paint face (Paint) |
+| LMB drag (>8px) | Marquee select (Select mode) |
+| Del | Delete selection (Select mode) |
+| Alt + RMB | Delete block under cursor |
+| Q / E | Rotate placement (Place) or selection (Select) |
+| Ctrl+Z / Ctrl+Y | Undo / redo place, delete, bulk delete, paint |
 
 ## Crate layout
 

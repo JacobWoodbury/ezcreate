@@ -1,9 +1,13 @@
 use crate::{
     content::ContentPlugin,
-    resources::{GameMode, GameModeChanged, OccupancyMap, PlacementState, UndoStack},
+    resources::{
+        GameMode, GameModeChanged, OccupancyMap, PaintState, PlacementState, RecentPicks,
+        SelectionState, UndoStack,
+    },
     systems::{
         camera_orbit::OrbitCameraPlugin, input_router::InputRouterPlugin,
-        placement::PlacementPlugin, undo_redo::UndoRedoPlugin, world_setup::WorldSetupPlugin,
+        paint::PaintPlugin, placement::PlacementPlugin, selection::SelectionPlugin,
+        undo_redo::UndoRedoPlugin, world_setup::WorldSetupPlugin,
     },
     ui::UiPlugin,
 };
@@ -19,6 +23,9 @@ impl Plugin for EzCreatePlugin {
             .init_resource::<crate::resources::GamePreferences>()
             .init_resource::<OccupancyMap>()
             .init_resource::<PlacementState>()
+            .init_resource::<SelectionState>()
+            .init_resource::<PaintState>()
+            .init_resource::<RecentPicks>()
             .init_resource::<UndoStack>()
             .add_message::<GameModeChanged>()
             .add_plugins((
@@ -28,6 +35,8 @@ impl Plugin for EzCreatePlugin {
                 OrbitCameraPlugin,
                 ContentPlugin,
                 PlacementPlugin,
+                SelectionPlugin,
+                PaintPlugin,
                 InputRouterPlugin,
                 UndoRedoPlugin,
                 UiPlugin,

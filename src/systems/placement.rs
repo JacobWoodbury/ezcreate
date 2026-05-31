@@ -174,11 +174,13 @@ fn handle_place_and_delete(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    if keys.just_pressed(KeyCode::KeyQ) {
-        placement.rotate_yaw_reverse();
-    }
-    if keys.just_pressed(KeyCode::KeyE) {
-        placement.rotate_yaw_forward();
+    if *mode == GameMode::Place {
+        if keys.just_pressed(KeyCode::KeyQ) {
+            placement.rotate_yaw_reverse();
+        }
+        if keys.just_pressed(KeyCode::KeyE) {
+            placement.rotate_yaw_forward();
+        }
     }
 
     let Ok(root) = placed_root.single() else {
@@ -208,6 +210,7 @@ fn handle_place_and_delete(
                 &mut materials,
                 root,
                 &item.item_id,
+                &item.scene_path,
                 cell,
                 world,
                 rotation,
@@ -220,6 +223,7 @@ fn handle_place_and_delete(
                     item_id: item.item_id,
                     grid_key: cell,
                     rotation,
+                    scene_path: item.scene_path,
                 },
             });
         }
@@ -244,6 +248,7 @@ fn handle_place_and_delete(
                     item_id: block.item_id.clone(),
                     grid_key: block.grid_key,
                     rotation: transform.rotation(),
+                    scene_path: block.scene_path.clone(),
                 };
                 commands.entity(entity).despawn();
                 occupancy.remove(cell);
@@ -259,6 +264,7 @@ pub fn spawn_block(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     parent: Entity,
     item_id: &str,
+    scene_path: &str,
     grid_key: IVec3,
     world: Vec3,
     rotation: Quat,
@@ -275,6 +281,7 @@ pub fn spawn_block(
             PlacedBlock {
                 item_id: item_id.to_string(),
                 grid_key,
+                scene_path: scene_path.to_string(),
             },
             Mesh3d(mesh),
             MeshMaterial3d(material),
