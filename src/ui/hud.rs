@@ -162,7 +162,7 @@ fn draw_hud(
 
             if *mode == GameMode::Paint {
                 ui.separator();
-                draw_stamp_editor(ui, &mut stamp_painter, &mut ui_state);
+                draw_stamp_editor(ui, &mut stamp_painter, &mut paint, &mut ui_state);
             }
         });
     });
@@ -196,13 +196,13 @@ fn draw_hud(
                 GameMode::Paint => {
                     ui.separator();
                     if stamp_painter.apply_mode {
-                        ui.label("Stamp mode · LMB apply to face");
+                        ui.label("Hover face highlights · LMB paints");
                         if ui.small_button("Edit stamp").clicked() {
                             stamp_painter.apply_mode = false;
                         }
                     } else {
-                        ui.label("Edit stamp · click cells in sidebar · ↵ to apply");
-                        if ui.small_button("Apply mode").clicked() {
+                        ui.label("Edit stamp grid in sidebar");
+                        if ui.small_button("Apply to blocks").clicked() {
                             stamp_painter.apply_mode = true;
                         }
                     }
@@ -217,7 +217,12 @@ fn draw_hud(
 }
 
 /// Stamp editor panel — shown in the sidebar when in Paint mode.
-fn draw_stamp_editor(ui: &mut egui::Ui, stamp_painter: &mut StampPainter, ui_state: &mut UiState) {
+fn draw_stamp_editor(
+    ui: &mut egui::Ui,
+    stamp_painter: &mut StampPainter,
+    paint: &mut PaintState,
+    ui_state: &mut UiState,
+) {
     ui.heading("Stamp editor");
 
     // Mode toggle.
@@ -238,7 +243,9 @@ fn draw_stamp_editor(ui: &mut egui::Ui, stamp_painter: &mut StampPainter, ui_sta
         let [r, g, b, a] = stamp_painter.brush_color;
         let mut egui_color = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
         if ui.color_edit_button_srgba(&mut egui_color).changed() {
-            stamp_painter.brush_color = [egui_color.r(), egui_color.g(), egui_color.b(), egui_color.a()];
+            stamp_painter.brush_color =
+                [egui_color.r(), egui_color.g(), egui_color.b(), egui_color.a()];
+            paint.brush_color = stamp_painter.brush_color_bevy();
         }
     });
 

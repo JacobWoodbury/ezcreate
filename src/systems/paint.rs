@@ -5,7 +5,9 @@ use crate::{
     components::{FacePaintDecal, PaintPreview, PlacedBlock},
     resources::{FacePaintSnapshot, GameMode, GridConfig, GridEdit, PaintState, StampPainter, UndoStack},
     systems::{
-        raycast_util::{cursor_ray, raycast_placed_block},
+        raycast_util::{
+            block_face_center, cursor_ray, paint_preview_color, raycast_placed_block, snap_axis_normal,
+        },
         stamp_mesh::{face_transform, spawn_stamp_decal},
     },
 };
@@ -27,6 +29,7 @@ fn update_paint_hover(
     grid: Res<GridConfig>,
     mut paint: ResMut<PaintState>,
     spatial_query: avian3d::prelude::SpatialQuery,
+    block_transforms: Query<(Entity, &GlobalTransform), With<PlacedBlock>>,
     blocks: Query<Entity, With<PlacedBlock>>,
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -61,11 +64,17 @@ fn update_paint_hover(
         return;
     };
 
-    let hit_pos = ray.origin + *ray.direction * hit.distance;
+    let Ok((block, block_transform)) = block_transforms.get(hit.entity) else {
+        return;
+    };
+
+    let face_normal = snap_axis_normal(hit.normal);
+    let face_center = block_face_center(block_transform.translation(), grid.grid_size, face_normal);
+
     paint.hover_hit = Some(crate::resources::PaintFaceHit {
-        block: hit.entity,
-        position: hit_pos,
-        normal: hit.normal,
+        block,
+        position: face_center,
+        normal: face_normal,
     });
 }
 
@@ -92,17 +101,15 @@ fn sync_paint_preview(
     };
 
     let bias = grid.grid_size * 0.02;
-    let face_size = grid.grid_size * 0.9;
+    let face_size = grid.grid_size * 0.98;
+    let brush = stamp_painter.brush_color_bevy();
+    let preview_tint = paint_preview_color(brush);
 
-    if stamp_painter.apply_mode {
-        // Show a stamp preview: spawn pixel planes with reduced alpha under PaintPreview root.
-        let alpha_stamp = {
-            let mut s = stamp_painter.stamp.clone();
-            for px in &mut s.pixels {
-                px[3] = (px[3] / 2).max(60);
-            }
-            s
-        };
+    if stamp_painter.apply_mode && stamp_painter.has_pattern_cutouts() {
+        let mut alpha_stamp = stamp_painter.stamp.clone();
+        for px in &mut alpha_stamp.pixels {
+            px[3] = (px[3] / 2).max(60);
+        }
 
         let root = spawn_stamp_decal(
             &mut commands,
@@ -115,23 +122,47 @@ fn sync_paint_preview(
             bias,
         );
         commands.entity(root).insert(PaintPreview);
-    } else {
-        // Solid-color brush preview.
-        let half = face_size * 0.5;
-        let size = Vec2::splat(half * 2.0);
-        let mesh = meshes.add(Plane3d::new(Vec3::Y, size));
-        let mut preview_color = paint.brush_color.to_srgba();
-        preview_color.alpha *= 0.55;
-        let material = materials.add(StandardMaterial {
-            base_color: Color::from(preview_color),
-            unlit: true,
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            ..default()
-        });
-        let transform = face_transform(hit.position, hit.normal, face_size, bias);
-        commands.spawn((PaintPreview, Mesh3d(mesh), MeshMaterial3d(material), transform));
     }
+
+    spawn_face_overlay(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        hit.position,
+        hit.normal,
+        face_size,
+        bias,
+        preview_tint,
+    );
+}
+
+fn spawn_face_overlay(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    face_center: Vec3,
+    face_normal: Vec3,
+    face_size: f32,
+    bias: f32,
+    color: Color,
+) {
+    let half = face_size * 0.5;
+    let mesh = meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(half)));
+    let material = materials.add(StandardMaterial {
+        base_color: color,
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        double_sided: true,
+        ..default()
+    });
+    let transform = face_transform(face_center, face_normal, face_size, bias);
+    commands.spawn((
+        PaintPreview,
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        transform,
+        Visibility::default(),
+    ));
 }
 
 fn handle_face_paint(
@@ -145,8 +176,14 @@ fn handle_face_paint(
     mut undo: ResMut<UndoStack>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    children: Query<&Children>,
+    decals: Query<(Entity, &FacePaintDecal)>,
 ) {
     if *mode != GameMode::Paint || !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+
+    if !stamp_painter.apply_mode {
         return;
     }
 
@@ -159,9 +196,12 @@ fn handle_face_paint(
     };
 
     let bias = grid.grid_size * 0.025;
-    let face_size = grid.grid_size * 0.9;
+    let face_size = grid.grid_size * 0.98;
+    let brush = stamp_painter.brush_color_bevy();
 
-    let decal = if stamp_painter.apply_mode {
+    clear_face_paint(&mut commands, &children, &decals, hit.block, hit.normal);
+
+    let decal = if stamp_painter.has_pattern_cutouts() {
         spawn_stamp_decal(
             &mut commands,
             &mut meshes,
@@ -173,27 +213,16 @@ fn handle_face_paint(
             bias,
         )
     } else {
-        // Solid-color paint.
-        let half = face_size * 0.5;
-        let size = Vec2::splat(half * 2.0);
-        let mesh = meshes.add(Plane3d::new(Vec3::Y, size));
-        let rotation = Quat::from_rotation_arc(Vec3::Y, hit.normal);
-        let material = materials.add(StandardMaterial {
-            base_color: paint.brush_color,
-            unlit: true,
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            ..default()
-        });
-        commands
-            .spawn((
-                FacePaintDecal { color: paint.brush_color },
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                Transform::from_translation(hit.position + hit.normal * bias)
-                    .with_rotation(rotation),
-            ))
-            .id()
+        spawn_solid_face_decal(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            hit.position,
+            hit.normal,
+            face_size,
+            bias,
+            brush,
+        )
     };
 
     commands.entity(hit.block).add_child(decal);
@@ -201,7 +230,62 @@ fn handle_face_paint(
         snapshot: FacePaintSnapshot {
             parent_block: hit.block,
             decal_entity: decal,
-            color: paint.brush_color,
+            color: brush,
         },
     });
+}
+
+fn clear_face_paint(
+    commands: &mut Commands,
+    children: &Query<&Children>,
+    decals: &Query<(Entity, &FacePaintDecal)>,
+    block: Entity,
+    face_normal: Vec3,
+) {
+    let Ok(kids) = children.get(block) else {
+        return;
+    };
+    for child in kids.iter() {
+        let Ok((entity, decal)) = decals.get(child) else {
+            continue;
+        };
+        if decal.face_normal.dot(face_normal) > 0.9 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn spawn_solid_face_decal(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    face_center: Vec3,
+    face_normal: Vec3,
+    face_size: f32,
+    bias: f32,
+    color: Color,
+) -> Entity {
+    let half = face_size * 0.5;
+    let mesh = meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(half)));
+    let rotation = Quat::from_rotation_arc(Vec3::Y, face_normal);
+    let material = materials.add(StandardMaterial {
+        base_color: color,
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        double_sided: true,
+        ..default()
+    });
+
+    commands
+        .spawn((
+            FacePaintDecal {
+                color,
+                face_normal,
+            },
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(face_center + face_normal * bias).with_rotation(rotation),
+            Visibility::default(),
+        ))
+        .id()
 }

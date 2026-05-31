@@ -41,7 +41,7 @@ fn setup_world(
         Collider::cuboid(50.0, 0.05, 50.0),
     ));
 
-    commands.spawn(PlacedRoot);
+    commands.spawn((PlacedRoot, Visibility::default()));
 
     commands
         .spawn((

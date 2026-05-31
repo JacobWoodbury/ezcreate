@@ -208,6 +208,7 @@ fn sync_ghost_preview(
             .spawn((
                 GhostPreview,
                 Transform::from_translation(anchor_world).with_rotation(rotation),
+                Visibility::default(),
             ))
             .id();
 
@@ -433,6 +434,7 @@ pub fn spawn_block(
             Mesh3d(mesh),
             MeshMaterial3d(material),
             Transform::from_translation(world).with_rotation(rotation),
+            Visibility::default(),
             RigidBody::Static,
             Collider::cuboid(grid_size * 0.5, grid_size * 0.5, grid_size * 0.5),
         ))

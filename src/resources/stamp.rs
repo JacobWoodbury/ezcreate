@@ -74,6 +74,21 @@ impl Default for StampPainter {
 }
 
 impl StampPainter {
+    /// True when the stamp has cutouts (transparent pixels) and should be stamped instead of a solid fill.
+    pub fn has_pattern_cutouts(&self) -> bool {
+        self.stamp.pixels.iter().any(|p| p[3] < 16)
+    }
+
+    pub fn brush_color_bevy(&self) -> Color {
+        let [r, g, b, a] = self.brush_color;
+        Color::srgba(
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            a as f32 / 255.0,
+        )
+    }
+
     /// Directory for user-created stamps.
     pub fn stamps_dir() -> Option<PathBuf> {
         dirs::data_dir().map(|d| d.join("ezcreate/stamps"))

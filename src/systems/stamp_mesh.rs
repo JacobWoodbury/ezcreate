@@ -30,7 +30,10 @@ pub fn spawn_stamp_decal(
 
     let root = commands
         .spawn((
-            FacePaintDecal { color: Color::WHITE },
+            FacePaintDecal {
+                color: Color::WHITE,
+                face_normal,
+            },
             Transform::from_translation(hit_pos + face_normal * bias).with_rotation(rotation),
             Visibility::default(),
         ))
