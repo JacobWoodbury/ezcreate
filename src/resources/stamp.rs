@@ -74,9 +74,14 @@ impl Default for StampPainter {
 }
 
 impl StampPainter {
-    /// True when the stamp has cutouts (transparent pixels) and should be stamped instead of a solid fill.
-    pub fn has_pattern_cutouts(&self) -> bool {
-        self.stamp.pixels.iter().any(|p| p[3] < 16)
+    /// True when every pixel is fully transparent (use solid brush color on faces).
+    pub fn stamp_is_empty(&self) -> bool {
+        self.stamp.pixels.iter().all(|p| p[3] < 16)
+    }
+
+    /// True when the stamp grid should be applied to faces (any opaque pixel).
+    pub fn apply_uses_stamp_grid(&self) -> bool {
+        !self.stamp_is_empty()
     }
 
     pub fn brush_color_bevy(&self) -> Color {

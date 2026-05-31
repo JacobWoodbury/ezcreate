@@ -192,7 +192,7 @@ fn draw_hud(
                 GameMode::Paint => {
                     ui.separator();
                     if stamp_painter.apply_mode {
-                        ui.label("Hover face highlights · LMB paints");
+                        ui.label("LMB applies stamp grid · Clear = solid brush color");
                         if ui.small_button("Edit stamp").clicked() {
                             stamp_painter.apply_mode = false;
                         }
@@ -257,6 +257,8 @@ fn draw_stamp_editor(
     });
 
     ui.add_space(4.0);
+    ui.label("Click cells to paint the stamp. Apply mode stamps this grid onto block faces.");
+    ui.small("Clear all pixels to use brush color as a solid fill instead.");
 
     // The pixel grid.
     let cols = stamp_painter.stamp.width;

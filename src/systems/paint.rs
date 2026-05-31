@@ -20,11 +20,17 @@ pub struct PaintPlugin;
 
 impl Plugin for PaintPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<StampPainter>().add_systems(
-            Update,
-            (update_paint_hover, sync_paint_preview, handle_face_paint).chain(),
-        );
+        app.init_resource::<StampPainter>()
+            .add_systems(Startup, load_saved_stamps)
+            .add_systems(
+                Update,
+                (update_paint_hover, sync_paint_preview, handle_face_paint).chain(),
+            );
     }
+}
+
+fn load_saved_stamps(mut stamp_painter: ResMut<StampPainter>) {
+    stamp_painter.reload_stamps();
 }
 
 /// Raycast the block face under the cursor; returns block entity, world face center, and normal.
@@ -117,36 +123,38 @@ fn sync_paint_preview(
     let brush = stamp_painter.brush_color_bevy();
     let preview_tint = paint_preview_color(brush);
 
-    if stamp_painter.apply_mode && stamp_painter.has_pattern_cutouts() {
-        let mut alpha_stamp = stamp_painter.stamp.clone();
-        for px in &mut alpha_stamp.pixels {
-            px[3] = (px[3] / 2).max(60);
+    if stamp_painter.apply_mode {
+        if stamp_painter.apply_uses_stamp_grid() {
+            let mut preview_stamp = stamp_painter.stamp.clone();
+            for px in &mut preview_stamp.pixels {
+                px[3] = (px[3] / 2).max(60);
+            }
+
+            let root = spawn_stamp_decal(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &preview_stamp,
+                hit.normal,
+                face_size,
+                face_transform(hit.position, hit.normal, face_size, bias),
+                brush,
+                hit.block,
+            );
+            commands.entity(root).insert(PaintPreview);
+        } else {
+            spawn_face_overlay(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                hit.position,
+                hit.normal,
+                face_size,
+                bias,
+                preview_tint,
+            );
         }
-
-        let root = spawn_stamp_decal(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &alpha_stamp,
-            hit.normal,
-            face_size,
-            face_transform(hit.position, hit.normal, face_size, bias),
-            brush,
-            hit.block,
-        );
-        commands.entity(root).insert(PaintPreview);
     }
-
-    spawn_face_overlay(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        hit.position,
-        hit.normal,
-        face_size,
-        bias,
-        preview_tint,
-    );
 }
 
 fn spawn_face_overlay(
@@ -222,7 +230,7 @@ fn handle_face_paint(
 
     clear_face_paint(&mut commands, &decals, hit.block, hit.normal);
 
-    if stamp_painter.has_pattern_cutouts() {
+    let kind = if stamp_painter.apply_uses_stamp_grid() {
         spawn_stamp_decal(
             &mut commands,
             &mut meshes,
@@ -234,6 +242,7 @@ fn handle_face_paint(
             brush,
             hit.block,
         );
+        FacePaintKind::Stamp(stamp_painter.stamp.clone())
     } else {
         spawn_solid_face_decal(
             &mut commands,
@@ -245,11 +254,6 @@ fn handle_face_paint(
             world_transform,
             brush,
         );
-    }
-
-    let kind = if stamp_painter.has_pattern_cutouts() {
-        FacePaintKind::Stamp(stamp_painter.stamp.clone())
-    } else {
         FacePaintKind::Solid
     };
 
