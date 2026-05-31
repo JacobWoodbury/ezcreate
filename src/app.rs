@@ -9,7 +9,7 @@ use crate::{
         paint::PaintPlugin, placement::PlacementPlugin, selection::SelectionPlugin,
         thumbnails::ThumbnailPlugin, undo_redo::UndoRedoPlugin, world_setup::WorldSetupPlugin,
     },
-    ui::UiPlugin,
+    ui::{configure_gameplay_after_ui, UiPlugin},
 };
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -28,8 +28,9 @@ impl Plugin for EzCreatePlugin {
             .init_resource::<PaintState>()
             .init_resource::<RecentPicks>()
             .init_resource::<UndoStack>()
-            .add_message::<GameModeChanged>()
-            .add_plugins((
+            .add_message::<GameModeChanged>();
+        configure_gameplay_after_ui(app);
+        app.add_plugins((
                 EguiPlugin::default(),
                 PhysicsPlugins::default(),
                 WorldSetupPlugin,

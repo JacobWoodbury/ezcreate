@@ -1,19 +1,23 @@
 use bevy::prelude::*;
-use bevy_egui::EguiContexts;
 
 use crate::components::{PlacedBlock, SelectionOutline};
 use crate::resources::{
     BindingId, GameMode, GridConfig, GridEdit, KeyBindings, OccupancyMap, PlacedBlockSnapshot,
     SelectionState, UndoStack,
 };
-use crate::systems::raycast_util::{cursor_ray, raycast_placed_block};
+use crate::systems::{
+    paint::remove_all_face_paint_on_block,
+    raycast_util::{cursor_ray, raycast_placed_block},
+};
+use crate::ui::{GameplayAfterUi, UiInputCapture};
 
 pub struct SelectionPlugin;
 
 impl Plugin for SelectionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SelectionOutlineAssets>()
-            .add_systems(Update, (handle_selection_input, sync_selection_outlines));
+            .add_systems(Update, sync_selection_outlines)
+            .add_systems(PostUpdate, handle_selection_input.in_set(GameplayAfterUi));
     }
 }
 
@@ -42,7 +46,7 @@ impl FromWorld for SelectionOutlineAssets {
 }
 
 fn handle_selection_input(
-    mut egui: EguiContexts,
+    capture: Res<UiInputCapture>,
     mode: Res<GameMode>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -54,8 +58,9 @@ fn handle_selection_input(
     mut undo: ResMut<UndoStack>,
     blocks: Query<(Entity, &PlacedBlock, &GlobalTransform)>,
     block_entities: Query<Entity, With<PlacedBlock>>,
+    decals: Query<(Entity, &crate::components::FacePaintDecal)>,
     spatial_query: avian3d::prelude::SpatialQuery,
-    windows: Query<&Window>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
 ) {
     if *mode != GameMode::Select {
@@ -65,8 +70,7 @@ fn handle_selection_input(
         return;
     }
 
-    let over_ui = egui.ctx_mut().is_ok_and(|ctx| ctx.is_pointer_over_area());
-    if over_ui && !selection.marquee_dragging {
+    if capture.block_game_pointer && !selection.marquee_dragging {
         return;
     }
 
@@ -122,41 +126,44 @@ fn handle_selection_input(
         selection.marquee_current = None;
     }
 
-    if bindings.delete_pressed(&keys) {
-        delete_selection(
-            &mut commands,
-            &mut occupancy,
-            &mut undo,
-            &mut selection,
-            &blocks,
-        );
-    }
+    if !capture.block_game_keyboard {
+        if bindings.delete_pressed(&keys) {
+            delete_selection(
+                &mut commands,
+                &mut occupancy,
+                &mut undo,
+                &mut selection,
+                &blocks,
+                &decals,
+            );
+        }
 
-    if bindings.just_pressed(&keys, BindingId::RotateCcw) {
-        rotate_selection_y(
-            &mut commands,
-            &mut occupancy,
-            &grid,
-            &selection,
-            &blocks,
-            -std::f32::consts::FRAC_PI_2,
-        );
-    }
-    if bindings.just_pressed(&keys, BindingId::RotateCw) {
-        rotate_selection_y(
-            &mut commands,
-            &mut occupancy,
-            &grid,
-            &selection,
-            &blocks,
-            std::f32::consts::FRAC_PI_2,
-        );
+        if bindings.just_pressed(&keys, BindingId::RotateCcw) {
+            rotate_selection_y(
+                &mut commands,
+                &mut occupancy,
+                &grid,
+                &selection,
+                &blocks,
+                -std::f32::consts::FRAC_PI_2,
+            );
+        }
+        if bindings.just_pressed(&keys, BindingId::RotateCw) {
+            rotate_selection_y(
+                &mut commands,
+                &mut occupancy,
+                &grid,
+                &selection,
+                &blocks,
+                std::f32::consts::FRAC_PI_2,
+            );
+        }
     }
 }
 
 fn pick_block_at_cursor(
     grid: &GridConfig,
-    windows: &Query<&Window>,
+    windows: &Query<&Window, With<bevy::window::PrimaryWindow>>,
     cameras: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     spatial_query: &avian3d::prelude::SpatialQuery,
     blocks: &Query<Entity, With<PlacedBlock>>,
@@ -185,13 +192,32 @@ fn blocks_in_screen_rect(
 
     blocks
         .iter()
-        .filter_map(|(entity, _, transform)| {
-            let Ok(screen) = camera.world_to_viewport(cam_transform, transform.translation()) else {
-                return None;
-            };
-            rect.contains(screen).then_some(entity)
+        .filter(|(_, _, transform)| {
+            block_center_in_marquee(camera, cam_transform, transform, rect)
         })
+        .map(|(entity, _, _)| entity)
         .collect()
+}
+
+/// Block is selected when its projected center lies inside the marquee (window logical pixels).
+fn block_center_in_marquee(
+    camera: &Camera,
+    cam_transform: &GlobalTransform,
+    transform: &GlobalTransform,
+    marquee: Rect,
+) -> bool {
+    let Some(screen) = world_to_window_point(camera, cam_transform, transform.translation()) else {
+        return false;
+    };
+    marquee.contains(screen)
+}
+
+fn world_to_window_point(
+    camera: &Camera,
+    cam_transform: &GlobalTransform,
+    world: Vec3,
+) -> Option<Vec2> {
+    camera.world_to_viewport(cam_transform, world).ok()
 }
 
 fn delete_selection(
@@ -200,6 +226,7 @@ fn delete_selection(
     undo: &mut UndoStack,
     selection: &mut SelectionState,
     blocks: &Query<(Entity, &PlacedBlock, &GlobalTransform)>,
+    decals: &Query<(Entity, &crate::components::FacePaintDecal)>,
 ) {
     let mut snapshots = Vec::new();
     for &entity in &selection.selected {
@@ -210,6 +237,7 @@ fn delete_selection(
                 rotation: transform.rotation(),
                 scene_path: block.scene_path.clone(),
             });
+            remove_all_face_paint_on_block(commands, decals, entity);
             occupancy.remove(block.grid_key);
             commands.entity(entity).despawn();
         }
@@ -268,37 +296,50 @@ fn rotate_selection_y(
 }
 
 fn sync_selection_outlines(
+    mode: Res<GameMode>,
     selection: Res<SelectionState>,
     assets: Res<SelectionOutlineAssets>,
     mut commands: Commands,
-    blocks: Query<Entity, With<PlacedBlock>>,
-    outlines: Query<(Entity, &ChildOf), With<SelectionOutline>>,
+    block_globals: Query<&GlobalTransform, With<PlacedBlock>>,
+    mut outlines: Query<(Entity, &SelectionOutline, &mut Transform)>,
 ) {
-    let wanted: std::collections::HashSet<Entity> = selection.selected.clone();
+    let wanted: std::collections::HashSet<Entity> = if *mode == GameMode::Select {
+        selection.selected.clone()
+    } else {
+        std::collections::HashSet::new()
+    };
 
-    for (outline_entity, child_of) in outlines.iter() {
-        if !wanted.contains(&child_of.0) {
+    for (outline_entity, outline, _) in outlines.iter() {
+        if !wanted.contains(&outline.block) {
             commands.entity(outline_entity).despawn();
         }
     }
 
     for &block in &wanted {
-        if blocks.get(block).is_err() {
+        let Ok(block_global) = block_globals.get(block) else {
+            continue;
+        };
+
+        let world_transform = Transform {
+            translation: block_global.translation(),
+            rotation: block_global.rotation(),
+            scale: Vec3::ONE,
+        };
+
+        if let Some((_, _, mut transform)) = outlines
+            .iter_mut()
+            .find(|(_, o, _)| o.block == block)
+        {
+            *transform = world_transform;
             continue;
         }
 
-        let has_outline = outlines.iter().any(|(_, child_of)| child_of.0 == block);
-        if has_outline {
-            continue;
-        }
-
-        commands.entity(block).with_children(|parent| {
-            parent.spawn((
-                SelectionOutline,
-                Mesh3d(assets.mesh.clone()),
-                MeshMaterial3d(assets.material.clone()),
-                Transform::from_scale(Vec3::splat(1.02)),
-            ));
-        });
+        commands.spawn((
+            SelectionOutline { block },
+            Mesh3d(assets.mesh.clone()),
+            MeshMaterial3d(assets.material.clone()),
+            world_transform,
+            Visibility::default(),
+        ));
     }
 }

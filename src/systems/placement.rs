@@ -1,28 +1,42 @@
 use avian3d::prelude::*;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy_egui::EguiContexts;
 
 use crate::{
-    components::{GhostPreview, PlacedBlock, PlacedRoot},
-    content::{bottom_pivot_offset_for_yaw, SectionBlueprintFile},
+    components::{FacePaintDecal, GhostPreview, PlacedBlock, PlacedRoot},
+    content::{section_anchor_offset_for_yaw, SectionBlueprintFile},
     resources::{
         ActiveSection, BindingId, GameMode, GridConfig, GridEdit, OccupancyMap,
         GameInput, KeyBindings, PlacementState, PlacedBlockSnapshot, UndoStack,
     },
     systems::{
-        paint::apply_blueprint_face_paint,
+        paint::{apply_blueprint_face_paint, remove_all_face_paint_on_block},
         raycast_util::{cursor_ray, raycast_placed_block},
     },
+    ui::{GameplayAfterUi, UiInputCapture},
 };
 
 pub struct PlacementPlugin;
 
+#[derive(SystemParam)]
+struct PlaceDeleteQueries<'w, 's> {
+    placed_root: Query<'w, 's, Entity, With<PlacedRoot>>,
+    blocks: Query<'w, 's, (Entity, &'static PlacedBlock, &'static GlobalTransform)>,
+    block_entities: Query<'w, 's, Entity, With<PlacedBlock>>,
+    decals: Query<'w, 's, (Entity, &'static FacePaintDecal)>,
+    spatial_query: SpatialQuery,
+    windows: Query<'w, 's, &'static Window>,
+    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<Camera3d>>,
+    meshes: ResMut<'w, Assets<Mesh>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+}
+
 impl Plugin for PlacementPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, resolve_selected_section)
-            .add_systems(Update, update_placement_target)
             .add_systems(Update, sync_ghost_preview)
-            .add_systems(Update, handle_place_and_delete);
+            .add_systems(PostUpdate, update_placement_target.in_set(GameplayAfterUi))
+            .add_systems(PostUpdate, handle_place_and_delete.in_set(GameplayAfterUi));
     }
 }
 
@@ -63,11 +77,11 @@ fn resolve_selected_section(mut placement: ResMut<PlacementState>) {
 }
 
 fn section_pivot(section: &ActiveSection, yaw: f32) -> Vec3 {
-    bottom_pivot_offset_for_yaw(&section.blueprint.pieces, yaw)
+    section_anchor_offset_for_yaw(&section.blueprint.pieces, yaw)
 }
 
 fn update_placement_target(
-    mut egui: EguiContexts,
+    capture: Res<UiInputCapture>,
     mode: Res<GameMode>,
     grid: Res<GridConfig>,
     windows: Query<&Window>,
@@ -84,7 +98,7 @@ fn update_placement_target(
         return;
     }
 
-    if egui.ctx_mut().is_ok_and(|ctx| ctx.is_pointer_over_area()) {
+    if capture.block_game_pointer {
         return;
     }
 
@@ -245,19 +259,13 @@ fn handle_place_and_delete(
     mode: Res<GameMode>,
     grid: Res<GridConfig>,
     input: GameInput,
+    capture: Res<UiInputCapture>,
     mut placement: ResMut<PlacementState>,
     mut occupancy: ResMut<OccupancyMap>,
     mut undo: ResMut<UndoStack>,
-    placed_root: Query<Entity, With<PlacedRoot>>,
-    blocks: Query<(Entity, &PlacedBlock, &GlobalTransform)>,
-    block_entities: Query<Entity, With<PlacedBlock>>,
-    spatial_query: SpatialQuery,
-    windows: Query<&Window>,
-    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut world: PlaceDeleteQueries,
 ) {
-    if *mode == GameMode::Place {
+    if *mode == GameMode::Place && !capture.block_game_keyboard {
         if input.bindings.just_pressed(&input.keys, BindingId::RotateCcw) {
             placement.rotate_yaw_reverse();
         }
@@ -269,6 +277,10 @@ fn handle_place_and_delete(
     let Ok(root) = placed_root.single() else {
         return;
     };
+
+    if capture.block_game_pointer {
+        return;
+    }
 
     if *mode == GameMode::Place
         && input.mouse.just_pressed(MouseButton::Left)
@@ -337,6 +349,7 @@ fn handle_place_and_delete(
                     rotation: transform.rotation(),
                     scene_path: block.scene_path.clone(),
                 };
+                remove_all_face_paint_on_block(&mut commands, &decals, entity);
                 commands.entity(entity).despawn();
                 occupancy.remove(cell);
                 undo.push(GridEdit::Delete { snapshot });

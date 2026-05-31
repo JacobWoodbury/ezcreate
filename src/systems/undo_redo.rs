@@ -4,16 +4,17 @@ use crate::{
     components::{FacePaintDecal, PlacedBlock, PlacedRoot},
     resources::{BindingId, GridConfig, GridEdit, KeyBindings, OccupancyMap, PlacedBlockSnapshot, UndoStack},
     systems::{
-        paint::{apply_face_paint_snapshot, remove_face_paint_on_block},
+        paint::{apply_face_paint_snapshot, remove_all_face_paint_on_block, remove_face_paint_on_block},
         placement::spawn_block,
     },
+    ui::{GameplayAfterUi, UiInputCapture},
 };
 
 pub struct UndoRedoPlugin;
 
 impl Plugin for UndoRedoPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, handle_undo_redo);
+        app.add_systems(PostUpdate, handle_undo_redo.in_set(GameplayAfterUi));
     }
 }
 
@@ -21,6 +22,7 @@ fn handle_undo_redo(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     bindings: Res<KeyBindings>,
+    capture: Res<UiInputCapture>,
     mut undo: ResMut<UndoStack>,
     grid: Res<GridConfig>,
     mut occupancy: ResMut<OccupancyMap>,
@@ -31,8 +33,10 @@ fn handle_undo_redo(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    if !KeyBindings::ctrl_pressed(&keys) {
+    if capture.block_game_keyboard {
         return;
+    }
+    if !KeyBindings::ctrl_pressed(&keys) {        return;
     }
 
     let Ok(root) = placed_root.single() else {
@@ -85,13 +89,15 @@ fn apply_inverse(
     edit: GridEdit,
 ) {
     match edit {
-        GridEdit::Place { snapshot } => despawn_at(commands, occupancy, blocks, snapshot.grid_key),
+        GridEdit::Place { snapshot } => {
+            despawn_at(commands, occupancy, blocks, decals, snapshot.grid_key);
+        }
         GridEdit::Delete { snapshot } => {
             respawn(commands, grid, occupancy, root, meshes, materials, snapshot);
         }
         GridEdit::BulkPlace { snapshots } => {
             for snapshot in snapshots {
-                despawn_at(commands, occupancy, blocks, snapshot.grid_key);
+                despawn_at(commands, occupancy, blocks, decals, snapshot.grid_key);
             }
         }
         GridEdit::BulkDelete { snapshots } => {
@@ -121,7 +127,9 @@ fn apply_forward(
         GridEdit::Place { snapshot } => {
             respawn(commands, grid, occupancy, root, meshes, materials, snapshot);
         }
-        GridEdit::Delete { snapshot } => despawn_at(commands, occupancy, blocks, snapshot.grid_key),
+        GridEdit::Delete { snapshot } => {
+            despawn_at(commands, occupancy, blocks, decals, snapshot.grid_key);
+        }
         GridEdit::BulkPlace { snapshots } => {
             for snapshot in snapshots {
                 respawn(commands, grid, occupancy, root, meshes, materials, snapshot);
@@ -129,7 +137,7 @@ fn apply_forward(
         }
         GridEdit::BulkDelete { snapshots } => {
             for snapshot in snapshots {
-                despawn_at(commands, occupancy, blocks, snapshot.grid_key);
+                despawn_at(commands, occupancy, blocks, decals, snapshot.grid_key);
             }
         }
         GridEdit::FacePaint { snapshot } => {
@@ -142,10 +150,12 @@ fn despawn_at(
     commands: &mut Commands,
     occupancy: &mut OccupancyMap,
     blocks: &Query<Entity, With<PlacedBlock>>,
+    decals: &Query<(Entity, &FacePaintDecal)>,
     cell: IVec3,
 ) {
     if let Some(entity) = occupancy.remove(cell) {
         if blocks.get(entity).is_ok() {
+            remove_all_face_paint_on_block(commands, decals, entity);
             commands.entity(entity).despawn();
         }
     }

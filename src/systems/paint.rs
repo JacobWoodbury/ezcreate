@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use bevy_egui::EguiContexts;
 
 use crate::{
     components::{FacePaintDecal, PaintPreview, PlacedBlock},
@@ -14,6 +13,7 @@ use crate::{
         },
         stamp_mesh::{face_transform, spawn_stamp_decal},
     },
+    ui::{GameplayAfterUi, UiInputCapture},
 };
 
 pub struct PaintPlugin;
@@ -22,10 +22,7 @@ impl Plugin for PaintPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<StampPainter>()
             .add_systems(Startup, load_saved_stamps)
-            .add_systems(
-                Update,
-                (update_paint_hover, sync_paint_preview, handle_face_paint).chain(),
-            );
+            .add_systems(PostUpdate, sync_paint_preview.after(update_paint_hover));
     }
 }
 
@@ -35,7 +32,7 @@ fn load_saved_stamps(mut stamp_painter: ResMut<StampPainter>) {
 
 /// Raycast the block face under the cursor; returns block entity, world face center, and normal.
 fn face_hit_under_cursor(
-    egui: &mut EguiContexts,
+    block_pointer: bool,
     grid: &GridConfig,
     spatial_query: &avian3d::prelude::SpatialQuery,
     block_globals: &Query<&GlobalTransform, With<PlacedBlock>>,
@@ -43,7 +40,7 @@ fn face_hit_under_cursor(
     windows: &Query<&Window>,
     cameras: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
 ) -> Option<crate::resources::PaintFaceHit> {
-    if egui.ctx_mut().is_ok_and(|ctx| ctx.is_pointer_over_area()) {
+    if block_pointer {
         return None;
     }
 
@@ -69,7 +66,7 @@ fn face_hit_under_cursor(
 }
 
 fn update_paint_hover(
-    mut egui: EguiContexts,
+    capture: Res<UiInputCapture>,
     mode: Res<GameMode>,
     grid: Res<GridConfig>,
     mut paint: ResMut<PaintState>,
@@ -86,7 +83,7 @@ fn update_paint_hover(
     }
 
     paint.hover_hit = face_hit_under_cursor(
-        &mut egui,
+        capture.block_game_pointer,
         &grid,
         &spatial_query,
         &block_globals,
@@ -187,7 +184,7 @@ fn spawn_face_overlay(
 }
 
 fn handle_face_paint(
-    mut egui: EguiContexts,
+    capture: Res<UiInputCapture>,
     mode: Res<GameMode>,
     mouse: Res<ButtonInput<MouseButton>>,
     stamp_painter: Res<StampPainter>,
@@ -207,12 +204,16 @@ fn handle_face_paint(
         return;
     }
 
+    if capture.block_game_pointer {
+        return;
+    }
+
     if !stamp_painter.apply_mode {
         return;
     }
 
     let Some(hit) = face_hit_under_cursor(
-        &mut egui,
+        capture.block_game_pointer,
         &grid,
         &spatial_query,
         &block_globals,
@@ -318,6 +319,27 @@ pub fn apply_face_paint_snapshot(
     }
 }
 
+/// Records undo and removes a face-paint decal (root entity; stamp children are despawned too).
+pub fn delete_face_decal_with_undo(
+    commands: &mut Commands,
+    undo: &mut UndoStack,
+    grid: &GridConfig,
+    decal_entity: Entity,
+    decal: &FacePaintDecal,
+) {
+    undo.push(GridEdit::FacePaint {
+        snapshot: FacePaintSnapshot {
+            parent_block: decal.parent_block,
+            color: decal.color,
+            face_normal: decal.face_normal,
+            face_size: grid.grid_size * 0.98,
+            bias: grid.grid_size * 0.025,
+            kind: decal.kind.clone(),
+        },
+    });
+    commands.entity(decal_entity).despawn();
+}
+
 /// Removes any decal on `block` facing `face_normal` (used by undo).
 pub fn remove_face_paint_on_block(
     commands: &mut Commands,
@@ -326,6 +348,19 @@ pub fn remove_face_paint_on_block(
     face_normal: Vec3,
 ) {
     clear_face_paint(commands, decals, block, face_normal);
+}
+
+/// Removes every face-paint decal on `block` (call before despawn).
+pub fn remove_all_face_paint_on_block(
+    commands: &mut Commands,
+    decals: &Query<(Entity, &FacePaintDecal)>,
+    block: Entity,
+) {
+    for (entity, decal) in decals.iter() {
+        if decal.parent_block == block {
+            commands.entity(entity).despawn();
+        }
+    }
 }
 
 fn clear_face_paint(

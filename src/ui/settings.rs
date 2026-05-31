@@ -51,8 +51,15 @@ fn draw_general_tab(ui: &mut egui::Ui, grid: &mut GridConfig, prefs: &mut GamePr
     ui.add_space(8.0);
     ui.heading("Selection");
     ui.checkbox(
-        &mut prefs.select_mode_hold_shift,
-        "Hold Shift for temporary Select mode",
+        &mut prefs.shift_toggles_place_select,
+        "Shift toggles Place / Select",
+    );
+
+    ui.add_space(8.0);
+    ui.heading("Camera");
+    ui.checkbox(
+        &mut prefs.invert_ws_pan,
+        "Invert W / S pan (forward / back)",
     );
 
     ui.add_space(8.0);

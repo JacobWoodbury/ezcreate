@@ -19,6 +19,13 @@ pub struct LibraryItemRef {
     pub manifest_dir: PathBuf,
 }
 
+impl LibraryItemRef {
+    /// User-saved grouped modules under app data (`user_blueprints` mod).
+    pub fn is_user_deletable(&self) -> bool {
+        self.mod_id == "user_blueprints"
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct LibraryCatalog {
     pub items: Vec<LibraryItemRef>,

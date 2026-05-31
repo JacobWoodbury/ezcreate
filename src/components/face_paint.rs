@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::resources::FacePaintKind;
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct FacePaintDecal {
     pub color: Color,
     /// Axis-aligned outward normal of the painted face (for replacing prior paint on the same face).

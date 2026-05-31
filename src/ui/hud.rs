@@ -4,28 +4,44 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use crate::{
     components::{FacePaintDecal, PlacedBlock},
-    content::{LibraryCatalog, LibraryItemRef, register_grouped_module},
+    content::{
+        delete_user_module, rename_user_module, LibraryCatalog, LibraryItemRef,
+        register_grouped_module,
+    },
     resources::{
         set_game_mode, GameMode, GameModeChanged, GamePreferences, GridConfig, KeyBindings,
-        PaintState, PlacementState, RecentPicks, SelectionState, StampPainter,
+        PaintState, PlacementState, RecentPicks, SelectionState, StampPainter, UndoStack,
     },
-    systems::thumbnails::{library_item_cache_key, ThumbnailCache},
-    ui::settings::{draw_settings_window, SettingsUiState},
+    systems::{
+        paint::delete_face_decal_with_undo,
+        thumbnails::{library_item_cache_key, ThumbnailCache},
+    },
+    ui::{
+        input_capture::UiInputCapture,
+        settings::{draw_settings_window, SettingsUiState},
+    },
 };
 
 #[derive(SystemParam)]
-struct ModuleSaveQueries<'w, 's> {
+struct HudWorldActions<'w, 's> {
+    commands: Commands<'w, 's>,
+    undo: ResMut<'w, UndoStack>,
     blocks: Query<'w, 's, (Entity, &'static PlacedBlock, &'static GlobalTransform)>,
-    decals: Query<'w, 's, &'static FacePaintDecal>,
+    decals: Query<'w, 's, (Entity, &'static FacePaintDecal)>,
 }
 
-pub struct UiPlugin;
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LibraryRowAction {
+    Select,
+    Delete,
+    StartRename,
+}
 
-impl Plugin for UiPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<UiState>()
-            .add_systems(EguiPrimaryContextPass, draw_hud);
-    }
+#[derive(Clone)]
+struct RenameTarget {
+    mod_id: String,
+    item_id: String,
+    buffer: String,
 }
 
 #[derive(Resource, Default)]
@@ -34,6 +50,28 @@ struct UiState {
     settings: SettingsUiState,
     stamp_save_name: String,
     stamp_name_error: Option<String>,
+    rename: Option<RenameTarget>,
+    rename_error: Option<String>,
+}
+
+pub struct UiPlugin;
+
+impl Plugin for UiPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<UiState>()
+            .add_systems(EguiPrimaryContextPass, (draw_hud, sync_ui_input_capture).chain());
+    }
+}
+
+fn sync_ui_input_capture(
+    mut contexts: EguiContexts,
+    mut capture: ResMut<UiInputCapture>,
+    ui_state: Res<UiState>,
+) {
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    UiInputCapture::sync(ctx, ui_state.show_settings, &mut capture);
 }
 
 fn draw_hud(
@@ -52,7 +90,7 @@ fn draw_hud(
     mut catalog: ResMut<LibraryCatalog>,
     mut thumbnails: ResMut<ThumbnailCache>,
     mut ui_state: ResMut<UiState>,
-    module_save: ModuleSaveQueries,
+    mut world: HudWorldActions,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -106,23 +144,100 @@ fn draw_hud(
         ui_state.show_settings = open;
     }
 
+    let process_item = |ui: &mut egui::Ui,
+                            ui_state: &mut UiState,
+                            item: &LibraryItemRef,
+                            placement: &mut PlacementState,
+                            recent: &mut RecentPicks,
+                            catalog: &mut LibraryCatalog,
+                            thumbnails: &mut ThumbnailCache|
+     -> Option<LibraryRowAction> {
+        if ui_state
+            .rename
+            .as_ref()
+            .is_some_and(|r| r.mod_id == item.mod_id && r.item_id == item.item_id)
+        {
+            match draw_library_item_renaming(ui, item, ui_state, thumbnails) {
+                RenameRowAction::Commit => {
+                    if let Some(rename) = ui_state.rename.take() {
+                        if let Err(e) = rename_user_module(item, &rename.buffer, catalog) {
+                            ui_state.rename_error = Some(e);
+                            ui_state.rename = Some(rename);
+                        } else {
+                            ui_state.rename_error = None;
+                            let name = rename.buffer.trim().to_string();
+                            for r in recent.items.iter_mut() {
+                                if r.mod_id == item.mod_id && r.item_id == item.item_id {
+                                    r.display_name = name.clone();
+                                }
+                            }
+                            if placement.selected_item.as_ref().is_some_and(|s| {
+                                s.mod_id == item.mod_id && s.item_id == item.item_id
+                            }) {
+                                if let Some(sel) = placement.selected_item.as_mut() {
+                                    sel.display_name = name;
+                                }
+                            }
+                        }
+                    }
+                }
+                RenameRowAction::Cancel => {
+                    ui_state.rename = None;
+                    ui_state.rename_error = None;
+                }
+                RenameRowAction::None => {}
+            }
+            return None;
+        }
+
+        let selected = placement
+            .selected_item
+            .as_ref()
+            .is_some_and(|s| s.item_id == item.item_id && s.mod_id == item.mod_id);
+
+        match draw_library_item(ui, item, selected, item.is_user_deletable(), thumbnails) {
+            Some(LibraryRowAction::Select) => Some(LibraryRowAction::Select),
+            Some(LibraryRowAction::Delete) => Some(LibraryRowAction::Delete),
+            Some(LibraryRowAction::StartRename) => {
+                ui_state.rename = Some(RenameTarget {
+                    mod_id: item.mod_id.clone(),
+                    item_id: item.item_id.clone(),
+                    buffer: item.display_name.clone(),
+                });
+                ui_state.rename_error = None;
+                None
+            }
+            None => None,
+        }
+    };
+
     // ── Left sidebar (library) ────────────────────────────────────────────────
     egui::SidePanel::left("library").default_width(260.0).show(ctx, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {
+            let mut module_to_delete: Option<LibraryItemRef> = None;
+
             if !recent.items.is_empty() {
                 ui.heading("Recent");
                 let recent_list = recent.items.clone();
                 for item in recent_list {
-                    let selected = placement
-                        .selected_item
-                        .as_ref()
-                        .is_some_and(|s| s.item_id == item.item_id);
-                    if draw_library_item(ui, &item, selected, &mut thumbnails) {
-                        placement.selected_item = Some(item.clone());
-                        placement.active_section = None;
-                        placement.snap_placement_euler();
-                        recent.push(item.clone());
-                        set_game_mode(&mut mode, &mut mode_events, GameMode::Place);
+                    match process_item(
+                        ui,
+                        &mut ui_state,
+                        &item,
+                        &mut placement,
+                        &mut recent,
+                        &mut catalog,
+                        &mut thumbnails,
+                    ) {
+                        Some(LibraryRowAction::Select) => {
+                            placement.selected_item = Some(item.clone());
+                            placement.active_section = None;
+                            placement.snap_placement_euler();
+                            recent.push(item.clone());
+                            set_game_mode(&mut mode, &mut mode_events, GameMode::Place);
+                        }
+                        Some(LibraryRowAction::Delete) => module_to_delete = Some(item),
+                        Some(LibraryRowAction::StartRename) | None => {}
                     }
                 }
                 ui.separator();
@@ -133,16 +248,44 @@ fn draw_hud(
                 ui.label("No mod.json items found under assets/mods");
             } else {
                 for item in catalog.items.clone() {
-                    let selected = placement
+                    match process_item(
+                        ui,
+                        &mut ui_state,
+                        &item,
+                        &mut placement,
+                        &mut recent,
+                        &mut catalog,
+                        &mut thumbnails,
+                    ) {
+                        Some(LibraryRowAction::Select) => {
+                            placement.selected_item = Some(item.clone());
+                            placement.active_section = None;
+                            placement.snap_placement_euler();
+                            recent.push(item.clone());
+                            set_game_mode(&mut mode, &mut mode_events, GameMode::Place);
+                        }
+                        Some(LibraryRowAction::Delete) => module_to_delete = Some(item),
+                        Some(LibraryRowAction::StartRename) | None => {}
+                    }
+                }
+            }
+
+            if let Some(item) = module_to_delete {
+                if let Err(err) = delete_user_module(&item, &mut catalog) {
+                    warn!("Delete module failed: {err}");
+                } else {
+                    recent.items.retain(|i| i.item_id != item.item_id || i.mod_id != item.mod_id);
+                    let cache_key = library_item_cache_key(&item);
+                    thumbnails.images.remove(&cache_key);
+                    thumbnails.colors.remove(&cache_key);
+                    thumbnails.texture_handles.remove(&cache_key);
+                    if placement
                         .selected_item
                         .as_ref()
-                        .is_some_and(|s| s.item_id == item.item_id);
-                    if draw_library_item(ui, &item, selected, &mut thumbnails) {
-                        placement.selected_item = Some(item.clone());
+                        .is_some_and(|s| s.item_id == item.item_id && s.mod_id == item.mod_id)
+                    {
+                        placement.selected_item = None;
                         placement.active_section = None;
-                        placement.snap_placement_euler();
-                        recent.push(item.clone());
-                        set_game_mode(&mut mode, &mut mode_events, GameMode::Place);
                     }
                 }
             }
@@ -155,8 +298,8 @@ fn draw_hud(
                     let name = format!("Module {}", selection.selected.len());
                     match register_grouped_module(
                         &selection,
-                        &module_save.blocks,
-                        &module_save.decals,
+                        &world.blocks,
+                        &world.decals,
                         &grid,
                         &name,
                         &mut catalog,
@@ -174,6 +317,14 @@ fn draw_hud(
             if *mode == GameMode::Paint {
                 ui.separator();
                 draw_stamp_editor(ui, &mut stamp_painter, &mut paint, &mut ui_state);
+                draw_painted_faces_panel(
+                    ui,
+                    &selection,
+                    &world.decals,
+                    &mut world.commands,
+                    &mut world.undo,
+                    &grid,
+                );
             }
         });
     });
@@ -357,94 +508,302 @@ fn draw_stamp_editor(
     if !stamp_painter.saved_stamps.is_empty() {
         ui.label("Saved stamps:");
         let saved = stamp_painter.saved_stamps.clone();
+        let mut stamp_to_delete: Option<String> = None;
         for (name, saved_stamp) in saved {
-            if ui.small_button(&name).clicked() {
-                stamp_painter.stamp = saved_stamp;
+            ui.horizontal(|ui| {
+                if ui.selectable_label(false, &name).clicked() {
+                    stamp_painter.stamp = saved_stamp;
+                }
+                if trash_icon_button(ui, "Delete stamp").clicked() {
+                    stamp_to_delete = Some(name);
+                }
+            });
+        }
+        if let Some(name) = stamp_to_delete {
+            if let Err(e) = stamp_painter.delete_saved_stamp(&name) {
+                ui_state.stamp_name_error = Some(e);
             }
         }
     }
 }
 
-/// Renders a library item row with a color swatch / thumbnail + label.
-/// Returns true if the row was clicked.
+/// Painted faces on the current selection (Paint mode).
+fn draw_painted_faces_panel(
+    ui: &mut egui::Ui,
+    selection: &SelectionState,
+    decals: &Query<(Entity, &FacePaintDecal)>,
+    commands: &mut Commands,
+    undo: &mut UndoStack,
+    grid: &GridConfig,
+) {
+    if selection.selected.is_empty() {
+        return;
+    }
+
+    let mut painted: Vec<(Entity, FacePaintDecal)> = Vec::new();
+    for (entity, decal) in decals.iter() {
+        if selection.selected.contains(&decal.parent_block) {
+            painted.push((entity, decal.clone()));
+        }
+    }
+
+    if painted.is_empty() {
+        return;
+    }
+
+    ui.separator();
+    ui.heading("Painted faces");
+    ui.small("On selected blocks");
+
+    let mut decal_to_delete: Option<Entity> = None;
+    painted.sort_by(|a, b| {
+        a.1.parent_block
+            .index()
+            .cmp(&b.1.parent_block.index())
+            .then(face_normal_sort_key(a.1.face_normal).cmp(&face_normal_sort_key(b.1.face_normal)))
+    });
+
+    for (entity, decal) in painted {
+        let kind_label = match &decal.kind {
+            crate::resources::FacePaintKind::Solid => "solid",
+            crate::resources::FacePaintKind::Stamp { .. } => "stamp",
+        };
+        let label = format!("{} · {}", face_normal_label(decal.face_normal), kind_label);
+        ui.horizontal(|ui| {
+            let [r, g, b, a] = {
+                let s = decal.color.to_srgba();
+                [
+                    (s.red * 255.0) as u8,
+                    (s.green * 255.0) as u8,
+                    (s.blue * 255.0) as u8,
+                    (s.alpha * 255.0) as u8,
+                ]
+            };
+            ui.colored_label(
+                egui::Color32::from_rgba_unmultiplied(r, g, b, a),
+                "■",
+            );
+            ui.label(&label);
+            if trash_icon_button(ui, "Remove face paint").clicked() {
+                decal_to_delete = Some(entity);
+            }
+        });
+    }
+
+    if let Some(entity) = decal_to_delete {
+        if let Ok((_, decal)) = decals.get(entity) {
+            delete_face_decal_with_undo(commands, undo, grid, entity, decal);
+        }
+    }
+}
+
+fn face_normal_label(n: Vec3) -> &'static str {
+    if n.y > 0.9 {
+        "+Y"
+    } else if n.y < -0.9 {
+        "-Y"
+    } else if n.x > 0.9 {
+        "+X"
+    } else if n.x < -0.9 {
+        "-X"
+    } else if n.z > 0.9 {
+        "+Z"
+    } else {
+        "-Z"
+    }
+}
+
+fn face_normal_sort_key(n: Vec3) -> (i32, i32, i32) {
+    (
+        (n.x * 10.0).round() as i32,
+        (n.y * 10.0).round() as i32,
+        (n.z * 10.0).round() as i32,
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RenameRowAction {
+    None,
+    Commit,
+    Cancel,
+}
+
+fn trash_icon_button(ui: &mut egui::Ui, tip: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new("🗑").size(14.0))
+            .frame(false)
+            .min_size(egui::vec2(20.0, 20.0)),
+    )
+    .on_hover_text(tip)
+}
+
+fn rename_icon_button(ui: &mut egui::Ui, tip: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new("✎").size(14.0))
+            .frame(false)
+            .min_size(egui::vec2(20.0, 20.0)),
+    )
+    .on_hover_text(tip)
+}
+
+fn draw_library_item_renaming(
+    ui: &mut egui::Ui,
+    item: &LibraryItemRef,
+    ui_state: &mut UiState,
+    thumbnails: &mut ThumbnailCache,
+) -> RenameRowAction {
+    const THUMB: f32 = 40.0;
+    let Some(rename) = ui_state.rename.as_mut() else {
+        return RenameRowAction::None;
+    };
+
+    let action = ui
+        .horizontal(|ui| {
+            let thumb_rect =
+                ui.allocate_exact_size(egui::vec2(THUMB, THUMB), egui::Sense::hover()).1;
+            if ui.is_rect_visible(thumb_rect.rect) {
+                let cache_key = library_item_cache_key(item);
+                let swatch = thumbnails
+                    .colors
+                    .get(&cache_key)
+                    .copied()
+                    .unwrap_or([80, 80, 80, 255]);
+                ui.painter().rect_filled(
+                    thumb_rect.rect,
+                    4.0,
+                    egui::Color32::from_rgba_unmultiplied(swatch[0], swatch[1], swatch[2], swatch[3]),
+                );
+            }
+            let response = ui.text_edit_singleline(&mut rename.buffer);
+            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                return RenameRowAction::Commit;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                return RenameRowAction::Cancel;
+            }
+            if response.lost_focus() {
+                return RenameRowAction::Commit;
+            }
+            RenameRowAction::None
+        })
+        .inner;
+
+    if let Some(err) = ui_state.rename_error.as_ref() {
+        ui.colored_label(egui::Color32::RED, err);
+    }
+
+    action
+}
+
+/// Renders a library item row with thumbnail, label, and optional delete control.
 fn draw_library_item(
     ui: &mut egui::Ui,
     item: &LibraryItemRef,
     selected: bool,
+    deletable: bool,
     thumbnails: &mut ThumbnailCache,
-) -> bool {
+) -> Option<LibraryRowAction> {
     const THUMB: f32 = 40.0;
-    let bg = if selected {
-        egui::Color32::from_rgba_unmultiplied(90, 160, 255, 60)
+    const TRASH_WIDTH: f32 = 28.0;
+    const RENAME_WIDTH: f32 = 28.0;
+    let row_height = THUMB + 4.0;
+
+    let mut action = None;
+    let chrome_width = if deletable {
+        TRASH_WIDTH + RENAME_WIDTH
     } else {
-        egui::Color32::TRANSPARENT
+        0.0
     };
 
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), THUMB + 4.0),
-        egui::Sense::click(),
-    );
-
-    if ui.is_rect_visible(rect) {
-        ui.painter().rect_filled(rect, 4.0, bg);
-
-        let thumb_rect = egui::Rect::from_min_size(
-            rect.min + egui::vec2(4.0, 2.0),
-            egui::vec2(THUMB, THUMB),
-        );
-        let cache_key = library_item_cache_key(item);
-        if let Some(color_image) = thumbnails.images.get(&cache_key).cloned() {
-            let handle = thumbnails.texture_handles.entry(cache_key.clone()).or_insert_with(|| {
-                ui.ctx().load_texture(
-                    cache_key.clone(),
-                    color_image,
-                    egui::TextureOptions::LINEAR,
-                )
-            });
-            ui.painter().image(
-                handle.id(),
-                thumb_rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
+    ui.horizontal(|ui| {
+        let row_width = (ui.available_width() - chrome_width).max(40.0);
+        let bg = if selected {
+            egui::Color32::from_rgba_unmultiplied(90, 160, 255, 60)
         } else {
-            let swatch = thumbnails
-                .colors
-                .get(&cache_key)
-                .copied()
-                .unwrap_or([80, 80, 80, 255]);
-            ui.painter().rect_filled(
-                thumb_rect,
-                4.0,
-                egui::Color32::from_rgba_unmultiplied(swatch[0], swatch[1], swatch[2], swatch[3]),
+            egui::Color32::TRANSPARENT
+        };
+
+        let (rect, response) = ui.allocate_exact_size(
+            egui::vec2(row_width, row_height),
+            egui::Sense::click(),
+        );
+
+        if ui.is_rect_visible(rect) {
+            ui.painter().rect_filled(rect, 4.0, bg);
+
+            let thumb_rect = egui::Rect::from_min_size(
+                rect.min + egui::vec2(4.0, 2.0),
+                egui::vec2(THUMB, THUMB),
+            );
+            let cache_key = library_item_cache_key(item);
+            if let Some(color_image) = thumbnails.images.get(&cache_key).cloned() {
+                let handle = thumbnails
+                    .texture_handles
+                    .entry(cache_key.clone())
+                    .or_insert_with(|| {
+                        ui.ctx().load_texture(
+                            cache_key.clone(),
+                            color_image,
+                            egui::TextureOptions::LINEAR,
+                        )
+                    });
+                ui.painter().image(
+                    handle.id(),
+                    thumb_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            } else {
+                let swatch = thumbnails
+                    .colors
+                    .get(&cache_key)
+                    .copied()
+                    .unwrap_or([80, 80, 80, 255]);
+                ui.painter().rect_filled(
+                    thumb_rect,
+                    4.0,
+                    egui::Color32::from_rgba_unmultiplied(
+                        swatch[0], swatch[1], swatch[2], swatch[3],
+                    ),
+                );
+            }
+
+            let label = if item.section_spec_path.is_some() {
+                format!("📦 {}", item.display_name)
+            } else {
+                item.display_name.clone()
+            };
+            let text_rect = egui::Rect::from_min_size(
+                rect.min + egui::vec2(THUMB + 8.0, 2.0),
+                egui::vec2(rect.width() - THUMB - 12.0, THUMB),
+            );
+            ui.painter().text(
+                text_rect.left_center(),
+                egui::Align2::LEFT_CENTER,
+                &label,
+                egui::FontId::proportional(13.0),
+                ui.visuals().text_color(),
             );
         }
 
-        // Name + section badge.
-        let label = if item.section_spec_path.is_some() {
-            format!("📦 {}", item.display_name)
-        } else {
-            item.display_name.clone()
-        };
-        let text_rect = egui::Rect::from_min_size(
-            rect.min + egui::vec2(THUMB + 8.0, 2.0),
-            egui::vec2(rect.width() - THUMB - 12.0, THUMB),
-        );
-        ui.painter().text(
-            text_rect.left_center(),
-            egui::Align2::LEFT_CENTER,
-            &label,
-            egui::FontId::proportional(13.0),
-            ui.visuals().text_color(),
-        );
-    }
+        if response.on_hover_text(format!("Mod: {}", item.mod_id)).clicked() {
+            action = Some(LibraryRowAction::Select);
+        }
 
-    response
-        .on_hover_text(format!("Mod: {}", item.mod_id))
-        .clicked()
+        if deletable {
+            if rename_icon_button(ui, "Rename module").clicked() {
+                action = Some(LibraryRowAction::StartRename);
+            }
+            if trash_icon_button(ui, "Delete module").clicked() {
+                action = Some(LibraryRowAction::Delete);
+            }
+        }
+    });
+
+    action
 }
 
-/// Drawn after panels so it sits on top of the 3D view; converts window pixels to egui points.
+/// Drawn after panels; marquee coords are window logical pixels (same as Bevy cursor / world_to_viewport).
 fn draw_marquee_overlay(ctx: &egui::Context, mode: &GameMode, selection: &SelectionState) {
     if *mode != GameMode::Select || !selection.marquee_dragging {
         return;
@@ -456,10 +815,10 @@ fn draw_marquee_overlay(ctx: &egui::Context, mode: &GameMode, selection: &Select
         return;
     }
 
-    let pp = ctx.pixels_per_point();
-    let min = egui::pos2(rect.min.x / pp, rect.min.y / pp);
-    let max = egui::pos2(rect.max.x / pp, rect.max.y / pp);
-    let egui_rect = egui::Rect::from_min_max(min, max);
+    let egui_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.min.x, rect.min.y),
+        egui::pos2(rect.max.x, rect.max.y),
+    );
 
     egui::Area::new(egui::Id::new("marquee_overlay"))
         .order(egui::Order::Tooltip)

@@ -111,6 +111,17 @@ impl StampPainter {
         Ok(())
     }
 
+    /// Delete a saved stamp file and remove it from `saved_stamps`.
+    pub fn delete_saved_stamp(&mut self, name: &str) -> Result<(), String> {
+        let dir = Self::stamps_dir().ok_or("Cannot resolve user data directory.")?;
+        let path = dir.join(format!("{}.json", sanitize_filename(name)));
+        if path.is_file() {
+            std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+        }
+        self.saved_stamps.retain(|(n, _)| n != name);
+        Ok(())
+    }
+
     /// Scan the stamps directory and populate `saved_stamps`.
     pub fn reload_stamps(&mut self) {
         self.saved_stamps.clear();

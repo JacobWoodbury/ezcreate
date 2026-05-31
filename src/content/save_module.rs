@@ -20,7 +20,7 @@ pub fn user_blueprints_root() -> Option<PathBuf> {
 pub fn register_grouped_module(
     selection: &SelectionState,
     blocks: &Query<(Entity, &PlacedBlock, &GlobalTransform)>,
-    decals: &Query<&FacePaintDecal>,
+    decals: &Query<(Entity, &FacePaintDecal)>,
     grid: &GridConfig,
     display_name: &str,
     catalog: &mut LibraryCatalog,
@@ -49,7 +49,7 @@ pub fn register_grouped_module(
 
     let mut face_paints_by_offset: HashMap<[i32; 3], Vec<BlueprintFacePaint>> = HashMap::new();
 
-    for decal in decals.iter() {
+    for (_, decal) in decals.iter() {
         if !selection.selected.contains(&decal.parent_block) {
             continue;
         }
@@ -150,6 +150,78 @@ pub fn register_grouped_module(
     };
     catalog.items.push(item_ref.clone());
     Ok(item_ref)
+}
+
+/// Removes a user-saved module from disk and the in-memory catalog.
+pub fn delete_user_module(item: &LibraryItemRef, catalog: &mut LibraryCatalog) -> Result<(), String> {
+    if !item.is_user_deletable() {
+        return Err("Built-in library items cannot be deleted.".into());
+    }
+
+    let manifest_path = item.manifest_dir.join("mod.json");
+    let text = std::fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?;
+    let mut manifest: ModManifest = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+
+    let removed = manifest
+        .items
+        .iter()
+        .position(|i| i.id == item.item_id)
+        .ok_or_else(|| format!("Item '{}' not found in mod.json", item.item_id))?;
+    let removed = manifest.items.remove(removed);
+
+    if let Some(spec_rel) = removed.section_spec_path.as_ref() {
+        let spec_path = item.manifest_dir.join(spec_rel);
+        if spec_path.is_file() {
+            std::fs::remove_file(&spec_path).map_err(|e| e.to_string())?;
+        }
+    }
+
+    let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    std::fs::write(&manifest_path, manifest_json).map_err(|e| e.to_string())?;
+
+    catalog.items.retain(|i| {
+        !(i.mod_id == item.mod_id && i.item_id == item.item_id)
+    });
+
+    Ok(())
+}
+
+/// Renames a user-saved module (`displayName` in mod.json and in-memory catalog).
+pub fn rename_user_module(
+    item: &LibraryItemRef,
+    new_display_name: &str,
+    catalog: &mut LibraryCatalog,
+) -> Result<(), String> {
+    if !item.is_user_deletable() {
+        return Err("Built-in library items cannot be renamed.".into());
+    }
+
+    let name = new_display_name.trim();
+    if name.is_empty() {
+        return Err("Name cannot be empty.".into());
+    }
+
+    let manifest_path = item.manifest_dir.join("mod.json");
+    let text = std::fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?;
+    let mut manifest: ModManifest = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+
+    let entry = manifest
+        .items
+        .iter_mut()
+        .find(|i| i.id == item.item_id)
+        .ok_or_else(|| format!("Item '{}' not found in mod.json", item.item_id))?;
+    entry.display_name = name.to_string();
+
+    let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    std::fs::write(&manifest_path, manifest_json).map_err(|e| e.to_string())?;
+
+    for lib_item in catalog.items.iter_mut() {
+        if lib_item.mod_id == item.mod_id && lib_item.item_id == item.item_id {
+            lib_item.display_name = name.to_string();
+        }
+    }
+
+    Ok(())
 }
 
 fn uuid_simple() -> String {

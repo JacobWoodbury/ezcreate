@@ -13,6 +13,8 @@ pub struct GhostPreview;
 #[derive(Component)]
 pub struct PaintPreview;
 
-/// Slightly larger child mesh shown when the parent block is selected.
+/// World-space highlight mesh for a selected block (not parented — blocks use `ChildOf(PlacedRoot)`).
 #[derive(Component)]
-pub struct SelectionOutline;
+pub struct SelectionOutline {
+    pub block: Entity,
+}

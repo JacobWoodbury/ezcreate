@@ -1,7 +1,6 @@
 use bevy::prelude::*;
-use bevy_egui::EguiContexts;
 
-use crate::components::OrbitCameraRig;
+use crate::{components::OrbitCameraRig, resources::GamePreferences, ui::{GameplayAfterUi, UiInputCapture}};
 
 #[derive(Component)]
 pub struct OrbitCameraState {
@@ -14,24 +13,22 @@ pub struct OrbitCameraPlugin;
 
 impl Plugin for OrbitCameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (orbit_mouse_input, orbit_keyboard_pan, orbit_apply));
+        app.add_systems(Update, orbit_apply)
+            .add_systems(PostUpdate, orbit_mouse_input.in_set(GameplayAfterUi))
+            .add_systems(PostUpdate, orbit_keyboard_pan.in_set(GameplayAfterUi));
     }
 }
 
 fn orbit_mouse_input(
-    mut egui: EguiContexts,
+    capture: Res<UiInputCapture>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut motion: MessageReader<bevy::input::mouse::MouseMotion>,
     mut scroll: MessageReader<bevy::input::mouse::MouseWheel>,
     mut rigs: Query<&mut OrbitCameraState, With<OrbitCameraRig>>,
 ) {
-    if egui
-        .ctx_mut()
-        .is_ok_and(|ctx| ctx.is_pointer_over_area())
-    {
+    if capture.block_game_pointer {
         return;
     }
-
     for mut state in &mut rigs {
         if mouse.pressed(MouseButton::Right) {
             for ev in motion.read() {
@@ -50,15 +47,25 @@ fn orbit_mouse_input(
 
 fn orbit_keyboard_pan(
     keys: Res<ButtonInput<KeyCode>>,
+    prefs: Res<GamePreferences>,
+    capture: Res<UiInputCapture>,
     time: Res<Time>,
     mut rigs: Query<(&mut Transform, &OrbitCameraState), With<OrbitCameraRig>>,
 ) {
+    if capture.block_game_keyboard {
+        return;
+    }    let (w_dir, s_dir) = if prefs.invert_ws_pan {
+        (Vec3::Z, Vec3::NEG_Z)
+    } else {
+        (Vec3::NEG_Z, Vec3::Z)
+    };
+
     let mut move_dir = Vec3::ZERO;
     if keys.pressed(KeyCode::KeyW) {
-        move_dir += Vec3::NEG_Z;
+        move_dir += w_dir;
     }
     if keys.pressed(KeyCode::KeyS) {
-        move_dir += Vec3::Z;
+        move_dir += s_dir;
     }
     if keys.pressed(KeyCode::KeyD) {
         move_dir += Vec3::X;
