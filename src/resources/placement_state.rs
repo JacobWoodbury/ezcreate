@@ -15,6 +15,10 @@ pub struct PlacementState {
     pub active_section: Option<ActiveSection>,
     pub placement_euler: Vec3,
     pub anchor_cell: Option<IVec3>,
+    /// When set, ghost pivot uses this world position instead of anchor cell center.
+    pub ghost_pivot_world: Option<Vec3>,
+    /// Whether clicking would place without overlapping (when prevent overlap is on).
+    pub placement_allowed: bool,
     /// Root ghost entity (single block or section pivot).
     pub ghost_entity: Option<Entity>,
 }
@@ -26,6 +30,8 @@ impl Default for PlacementState {
             active_section: None,
             placement_euler: Vec3::ZERO,
             anchor_cell: None,
+            ghost_pivot_world: None,
+            placement_allowed: false,
             ghost_entity: None,
         }
     }

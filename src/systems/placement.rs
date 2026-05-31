@@ -3,7 +3,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::{
-    components::{FacePaintDecal, GhostPreview, PlacedBlock, PlacedRoot},
+    components::{FacePaintDecal, GhostPreview, Ground, PlacedBlock, PlacedRoot},
     content::{section_anchor_offset_for_yaw, SectionBlueprintFile},
     resources::{
         ActiveSection, BindingId, GameMode, GridConfig, GridEdit, OccupancyMap,
@@ -11,7 +11,7 @@ use crate::{
     },
     systems::{
         paint::{apply_blueprint_face_paint, remove_all_face_paint_on_block},
-        raycast_util::{cursor_ray, raycast_placed_block},
+        raycast_util::{block_face_center, cursor_ray, resolve_placement_surface, raycast_placed_block},
     },
     ui::{GameplayAfterUi, UiInputCapture},
 };
@@ -95,9 +95,13 @@ fn update_placement_target(
     spatial_query: SpatialQuery,
     mut placement: ResMut<PlacementState>,
     occupancy: Res<OccupancyMap>,
-    placed_blocks: Query<Entity, With<PlacedBlock>>,
+    block_entities: Query<Entity, With<PlacedBlock>>,
+    block_globals: Query<&GlobalTransform, With<PlacedBlock>>,
+    ground: Query<Entity, With<Ground>>,
 ) {
     placement.anchor_cell = None;
+    placement.ghost_pivot_world = None;
+    placement.placement_allowed = false;
 
     if *mode != GameMode::Place || placement.selected_item.is_none() {
         return;
@@ -117,25 +121,31 @@ fn update_placement_target(
         return;
     };
 
-    // Allow hitting both ground and blocks so placement always has a surface.
-    let Ok(dir) = Dir3::new(ray.direction.normalize()) else {
-        return;
-    };
-    let Some(hit) = spatial_query.cast_ray(ray.origin, dir, grid.ray_length, true, &SpatialQueryFilter::default())
-    else {
+    let Some(surface) = resolve_placement_surface(
+        &grid,
+        &spatial_query,
+        &block_entities,
+        &ground,
+        &block_globals,
+        &ray,
+        grid.ray_length,
+    ) else {
         return;
     };
 
-    let hit_pos = ray.origin + *ray.direction * hit.distance;
-    let world = hit_pos + hit.normal * (grid.grid_size * 0.5);
-    let snapped = grid.snap_to_grid(world);
-    let cell = grid.world_to_grid(snapped);
+    let allowed = !grid.prevent_overlapping
+        || section_footprint_valid(&placement, &grid, &occupancy, surface.anchor_cell);
 
-    if section_footprint_valid(&placement, &grid, &occupancy, cell) {
-        placement.anchor_cell = Some(cell);
+    placement.anchor_cell = Some(surface.anchor_cell);
+    placement.placement_allowed = allowed;
+
+    if grid.prevent_overlapping && !allowed {
+        if placement.active_section.is_none() {
+            if let (Some(center), Some(normal)) = (surface.hit_block_center, surface.hit_face_normal) {
+                placement.ghost_pivot_world = Some(block_face_center(center, grid.grid_size, normal));
+            }
+        }
     }
-
-    let _ = placed_blocks;
 }
 
 fn section_footprint_valid(
@@ -202,12 +212,20 @@ fn sync_ghost_preview(
     placement.ghost_entity = None;
 
     let cell = placement.anchor_cell.unwrap();
-    let anchor_world = grid.grid_to_world(cell);
+    let anchor_world = placement
+        .ghost_pivot_world
+        .unwrap_or_else(|| grid.grid_to_world(cell));
     let yaw = placement.placement_euler.y;
     let rotation = Quat::from_rotation_y(yaw);
 
+    let ghost_color = if placement.placement_allowed {
+        Color::srgba(0.35, 0.85, 0.45, 0.45)
+    } else {
+        Color::srgba(0.9, 0.25, 0.2, 0.45)
+    };
+
     let ghost_material = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.35, 0.85, 0.45, 0.45),
+        base_color: ghost_color,
         unlit: true,
         alpha_mode: AlphaMode::Blend,
         ..default()
@@ -282,7 +300,10 @@ fn handle_place_and_delete(
         return;
     }
 
-    if *mode == GameMode::Place && input.mouse.just_pressed(MouseButton::Left) {
+    if *mode == GameMode::Place
+        && input.mouse.just_pressed(MouseButton::Left)
+        && placement.placement_allowed
+    {
         if let Some(cell) = placement.anchor_cell {
             if let Some(ref section) = placement.active_section.clone() {
                 place_section(
