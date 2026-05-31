@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+use crate::resources::FacePaintKind;
+
 #[derive(Component)]
 pub struct FacePaintDecal {
     pub color: Color,
@@ -7,4 +9,5 @@ pub struct FacePaintDecal {
     pub face_normal: Vec3,
     /// Block this decal belongs to (decals live in world space, not as mesh children).
     pub parent_block: Entity,
+    pub kind: FacePaintKind,
 }

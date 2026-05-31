@@ -5,4 +5,6 @@ mod section_blueprint;
 
 pub use mod_scanner::{ContentPlugin, LibraryCatalog, LibraryItemRef};
 pub use save_module::register_grouped_module;
-pub use section_blueprint::SectionBlueprintFile;
+pub use section_blueprint::{
+    BlueprintFacePaint, SectionBlueprintFile, local_face_normal_to_world, rgba8_to_color,
+};

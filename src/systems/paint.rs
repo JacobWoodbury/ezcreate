@@ -242,7 +242,9 @@ fn handle_face_paint(
             brush,
             hit.block,
         );
-        FacePaintKind::Stamp(stamp_painter.stamp.clone())
+        FacePaintKind::Stamp {
+            stamp: stamp_painter.stamp.clone(),
+        }
     } else {
         spawn_solid_face_decal(
             &mut commands,
@@ -300,7 +302,7 @@ pub fn apply_face_paint_snapshot(
                 snapshot.color,
             );
         }
-        FacePaintKind::Stamp(stamp) => {
+        FacePaintKind::Stamp { stamp } => {
             spawn_stamp_decal(
                 commands,
                 meshes,
@@ -365,10 +367,61 @@ fn spawn_solid_face_decal(
             color,
             face_normal,
             parent_block,
+            kind: FacePaintKind::Solid,
         },
         Mesh3d(mesh),
         MeshMaterial3d(material),
         world_transform,
         Visibility::default(),
     ));
+}
+
+/// Applies blueprint face paint after a block is spawned in a section.
+pub fn apply_blueprint_face_paint(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    block_entity: Entity,
+    block_center: Vec3,
+    grid_size: f32,
+    block_rotation: Quat,
+    paint: &crate::content::BlueprintFacePaint,
+) {
+    use crate::content::{local_face_normal_to_world, rgba8_to_color};
+    use crate::systems::raycast_util::{block_face_center, face_transform_world};
+
+    let face_normal = local_face_normal_to_world(paint.local_normal, block_rotation);
+    let brush = rgba8_to_color(paint.brush_color);
+    let face_size = grid_size * 0.98;
+    let bias = grid_size * 0.025;
+    let face_center = block_face_center(block_center, grid_size, face_normal);
+    let world_transform = face_transform_world(face_center, face_normal, bias);
+
+    match &paint.kind {
+        FacePaintKind::Solid => {
+            spawn_solid_face_decal(
+                commands,
+                meshes,
+                materials,
+                block_entity,
+                face_normal,
+                face_size,
+                world_transform,
+                brush,
+            );
+        }
+        FacePaintKind::Stamp { stamp } => {
+            spawn_stamp_decal(
+                commands,
+                meshes,
+                materials,
+                stamp,
+                face_normal,
+                face_size,
+                world_transform,
+                brush,
+                block_entity,
+            );
+        }
+    }
 }

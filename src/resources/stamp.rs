@@ -5,7 +5,7 @@ use std::path::PathBuf;
 pub const DEFAULT_STAMP_SIZE: usize = 4;
 
 /// A 2-D pixel grid used for face stamping in Paint mode.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stamp {
     pub width: usize,
     pub height: usize,

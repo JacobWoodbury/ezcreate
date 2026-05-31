@@ -1,10 +1,14 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
 
-use super::section_blueprint::{SectionBlueprintFile, SectionBlueprintPiece};
+use super::section_blueprint::{
+    BlueprintFacePaint, SectionBlueprintFile, SectionBlueprintPiece, color_to_rgba8,
+    world_face_normal_to_local,
+};
 use super::{LibraryCatalog, LibraryItemRef};
-use crate::components::PlacedBlock;
+use crate::components::{FacePaintDecal, PlacedBlock};
 use crate::content::manifest::{ModManifest, ModManifestItem};
 use crate::resources::{GridConfig, SelectionState};
 
@@ -16,6 +20,7 @@ pub fn user_blueprints_root() -> Option<PathBuf> {
 pub fn register_grouped_module(
     selection: &SelectionState,
     blocks: &Query<(Entity, &PlacedBlock, &GlobalTransform)>,
+    decals: &Query<&FacePaintDecal>,
     grid: &GridConfig,
     display_name: &str,
     catalog: &mut LibraryCatalog,
@@ -42,20 +47,52 @@ pub fn register_grouped_module(
         .reduce(|a, b| a.min(b))
         .unwrap();
 
+    let mut face_paints_by_offset: HashMap<[i32; 3], Vec<BlueprintFacePaint>> = HashMap::new();
+
+    for decal in decals.iter() {
+        if !selection.selected.contains(&decal.parent_block) {
+            continue;
+        }
+        let Ok((_, _, block_transform)) = blocks.get(decal.parent_block) else {
+            continue;
+        };
+        let grid_key = grid.world_to_grid(block_transform.translation());
+        let offset = [
+            grid_key.x - min_key.x,
+            grid_key.y - min_key.y,
+            grid_key.z - min_key.z,
+        ];
+        face_paints_by_offset
+            .entry(offset)
+            .or_default()
+            .push(BlueprintFacePaint {
+                local_normal: world_face_normal_to_local(
+                    decal.face_normal,
+                    block_transform.rotation(),
+                ),
+                brush_color: color_to_rgba8(decal.color),
+                kind: decal.kind.clone(),
+            });
+    }
+
     pieces.sort_by_key(|(k, _, _)| (k.y, k.x, k.z));
 
     let blueprint = SectionBlueprintFile {
         pieces: pieces
             .iter()
-            .map(|(key, scene_path, item_id)| SectionBlueprintPiece {
-                scene_path: scene_path.clone(),
-                item_id: item_id.clone(),
-                offset: [
+            .map(|(key, scene_path, item_id)| {
+                let offset = [
                     key.x - min_key.x,
                     key.y - min_key.y,
                     key.z - min_key.z,
-                ],
-                albedo_texture_path: None,
+                ];
+                SectionBlueprintPiece {
+                    scene_path: scene_path.clone(),
+                    item_id: item_id.clone(),
+                    offset,
+                    albedo_texture_path: None,
+                    face_paints: face_paints_by_offset.remove(&offset).unwrap_or_default(),
+                }
             })
             .collect(),
     };

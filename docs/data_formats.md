@@ -27,12 +27,24 @@
     "scenePath": "scenes/sample_block.glb",
     "itemId": "sample_block",
     "offset": [0, 0, 0],
-    "albedoTexturePath": "optional"
+    "albedoTexturePath": "optional",
+    "facePaints": [{
+      "localNormal": [0, 1, 0],
+      "brushColor": [220, 80, 60, 255],
+      "paintType": "solid"
+    }, {
+      "localNormal": [1, 0, 0],
+      "brushColor": [255, 255, 255, 255],
+      "paintType": "stamp",
+      "stamp": { "width": 4, "height": 4, "pixels": [] }
+    }]
   }]
 }
 ```
 
 Offsets are **grid cells relative to anchor** (minimum cell when saved). Placement applies rigid rotation around the piece centroid before occupancy keys are computed.
+
+**Face paint:** `facePaints` stores per-face decoration in **block-local** axis normals (`localNormal`, each component −1, 0, or 1). `paintType` is `solid` (flat brush color) or `stamp` (pixel grid). Saved automatically when using **Save selection as module** in Select mode.
 
 ## Entity meta (Godot) → Bevy components (target)
 

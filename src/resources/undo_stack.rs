@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use super::Stamp;
 
@@ -10,10 +11,11 @@ pub struct PlacedBlockSnapshot {
     pub scene_path: String,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "paintType", rename_all = "camelCase")]
 pub enum FacePaintKind {
     Solid,
-    Stamp(Stamp),
+    Stamp { stamp: Stamp },
 }
 
 #[derive(Clone)]

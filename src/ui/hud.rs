@@ -1,7 +1,9 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use crate::{
+    components::{FacePaintDecal, PlacedBlock},
     content::{LibraryCatalog, LibraryItemRef, register_grouped_module},
     resources::{
         set_game_mode, GameMode, GameModeChanged, GamePreferences, GridConfig, KeyBindings,
@@ -10,6 +12,12 @@ use crate::{
     systems::thumbnails::{library_item_cache_key, ThumbnailCache},
     ui::settings::{draw_settings_window, SettingsUiState},
 };
+
+#[derive(SystemParam)]
+struct ModuleSaveQueries<'w, 's> {
+    blocks: Query<'w, 's, (Entity, &'static PlacedBlock, &'static GlobalTransform)>,
+    decals: Query<'w, 's, &'static FacePaintDecal>,
+}
 
 pub struct UiPlugin;
 
@@ -44,7 +52,7 @@ fn draw_hud(
     mut catalog: ResMut<LibraryCatalog>,
     mut thumbnails: ResMut<ThumbnailCache>,
     mut ui_state: ResMut<UiState>,
-    blocks: Query<(Entity, &crate::components::PlacedBlock, &GlobalTransform)>,
+    module_save: ModuleSaveQueries,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -145,7 +153,14 @@ fn draw_hud(
                 ui.label("Save selection as reusable module (section JSON).");
                 if ui.button("Save selection as module").clicked() {
                     let name = format!("Module {}", selection.selected.len());
-                    match register_grouped_module(&selection, &blocks, &grid, &name, &mut catalog) {
+                    match register_grouped_module(
+                        &selection,
+                        &module_save.blocks,
+                        &module_save.decals,
+                        &grid,
+                        &name,
+                        &mut catalog,
+                    ) {
                         Ok(item) => {
                             recent.push(item);
                         }

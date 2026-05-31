@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 
-use crate::{components::FacePaintDecal, resources::Stamp};
+use crate::{
+    components::FacePaintDecal,
+    resources::{FacePaintKind, Stamp},
+};
 
 /// Spawn a stamp decal in world space: root + one `Plane3d` child per opaque pixel.
 pub fn spawn_stamp_decal(
@@ -26,6 +29,9 @@ pub fn spawn_stamp_decal(
                 color: decal_color,
                 face_normal,
                 parent_block,
+                kind: FacePaintKind::Stamp {
+                    stamp: stamp.clone(),
+                },
             },
             world_transform,
             Visibility::default(),

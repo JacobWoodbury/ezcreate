@@ -9,7 +9,10 @@ use crate::{
         ActiveSection, BindingId, GameMode, GridConfig, GridEdit, OccupancyMap,
         GameInput, KeyBindings, PlacementState, PlacedBlockSnapshot, UndoStack,
     },
-    systems::raycast_util::{cursor_ray, raycast_placed_block},
+    systems::{
+        paint::apply_blueprint_face_paint,
+        raycast_util::{cursor_ray, raycast_placed_block},
+    },
 };
 
 pub struct PlacementPlugin;
@@ -391,6 +394,18 @@ fn place_section(
             rotation,
             grid.grid_size,
         );
+        for face_paint in &piece.face_paints {
+            apply_blueprint_face_paint(
+                commands,
+                meshes,
+                materials,
+                entity,
+                world_pos,
+                grid.grid_size,
+                rotation,
+                face_paint,
+            );
+        }
         occupancy.insert(cell, entity);
         snapshots.push(PlacedBlockSnapshot {
             item_id: piece.item_id.clone(),
