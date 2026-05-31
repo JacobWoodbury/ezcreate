@@ -30,3 +30,15 @@ impl GameMode {
 pub struct GameModeChanged {
     pub mode: GameMode,
 }
+
+pub fn set_game_mode(
+    mode: &mut GameMode,
+    events: &mut MessageWriter<GameModeChanged>,
+    next: GameMode,
+) {
+    if *mode == next {
+        return;
+    }
+    *mode = next;
+    events.write(GameModeChanged { mode: next });
+}

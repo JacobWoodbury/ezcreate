@@ -3,8 +3,12 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use crate::{
     content::{LibraryCatalog, LibraryItemRef, register_grouped_module},
-    resources::{GameMode, GamePreferences, GridConfig, PaintState, PlacementState, RecentPicks, SelectionState, StampPainter, DEFAULT_STAMP_SIZE},
-    systems::thumbnails::ThumbnailCache,
+    resources::{
+        set_game_mode, GameMode, GameModeChanged, GamePreferences, GridConfig, KeyBindings,
+        PaintState, PlacementState, RecentPicks, SelectionState, StampPainter,
+    },
+    systems::thumbnails::{library_item_cache_key, ThumbnailCache},
+    ui::settings::{draw_settings_window, SettingsUiState},
 };
 
 pub struct UiPlugin;
@@ -19,6 +23,7 @@ impl Plugin for UiPlugin {
 #[derive(Resource, Default)]
 struct UiState {
     show_settings: bool,
+    settings: SettingsUiState,
     stamp_save_name: String,
     stamp_name_error: Option<String>,
 }
@@ -26,15 +31,18 @@ struct UiState {
 fn draw_hud(
     mut contexts: EguiContexts,
     mut mode: ResMut<GameMode>,
+    mut mode_events: MessageWriter<GameModeChanged>,
     mut grid: ResMut<GridConfig>,
     mut placement: ResMut<PlacementState>,
     mut paint: ResMut<PaintState>,
     mut stamp_painter: ResMut<StampPainter>,
     mut recent: ResMut<RecentPicks>,
     mut prefs: ResMut<GamePreferences>,
+    mut bindings: ResMut<KeyBindings>,
+    keys: Res<ButtonInput<KeyCode>>,
     selection: Res<SelectionState>,
     mut catalog: ResMut<LibraryCatalog>,
-    thumbnails: Res<ThumbnailCache>,
+    mut thumbnails: ResMut<ThumbnailCache>,
     mut ui_state: ResMut<UiState>,
     blocks: Query<(Entity, &crate::components::PlacedBlock, &GlobalTransform)>,
 ) {
@@ -48,13 +56,13 @@ fn draw_hud(
             ui.label("ezcreate");
             ui.separator();
             if ui.selectable_label(*mode == GameMode::Place, "Place").clicked() {
-                *mode = GameMode::Place;
+                set_game_mode(&mut mode, &mut mode_events, GameMode::Place);
             }
             if ui.selectable_label(*mode == GameMode::Select, "Select").clicked() {
-                *mode = GameMode::Select;
+                set_game_mode(&mut mode, &mut mode_events, GameMode::Select);
             }
             if ui.selectable_label(*mode == GameMode::Paint, "Paint").clicked() {
-                *mode = GameMode::Paint;
+                set_game_mode(&mut mode, &mut mode_events, GameMode::Paint);
             }
             ui.separator();
             ui.checkbox(&mut grid.prevent_overlapping, "Prevent overlap");
@@ -76,28 +84,16 @@ fn draw_hud(
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .default_width(320.0)
+            .default_width(360.0)
             .show(ctx, |ui| {
-                ui.heading("Placement");
-                ui.checkbox(&mut grid.prevent_overlapping, "Prevent block overlap");
-
-                ui.add_space(8.0);
-                ui.heading("Selection");
-                ui.checkbox(
-                    &mut prefs.select_mode_hold_shift,
-                    "Hold Shift for temporary Select mode",
+                draw_settings_window(
+                    ui,
+                    &mut grid,
+                    &mut prefs,
+                    &mut bindings,
+                    &mut ui_state.settings,
+                    &keys,
                 );
-
-                ui.add_space(8.0);
-                ui.heading("Grid");
-                ui.horizontal(|ui| {
-                    ui.label("Grid size:");
-                    ui.add(egui::DragValue::new(&mut grid.grid_size).range(0.25..=8.0).speed(0.05));
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Ray length:");
-                    ui.add(egui::DragValue::new(&mut grid.ray_length).range(10.0..=2000.0).speed(1.0));
-                });
             });
         ui_state.show_settings = open;
     }
@@ -113,12 +109,12 @@ fn draw_hud(
                         .selected_item
                         .as_ref()
                         .is_some_and(|s| s.item_id == item.item_id);
-                    if draw_library_item(ui, &item, selected, &thumbnails) {
+                    if draw_library_item(ui, &item, selected, &mut thumbnails) {
                         placement.selected_item = Some(item.clone());
                         placement.active_section = None;
                         placement.snap_placement_euler();
                         recent.push(item.clone());
-                        *mode = GameMode::Place;
+                        set_game_mode(&mut mode, &mut mode_events, GameMode::Place);
                     }
                 }
                 ui.separator();
@@ -133,12 +129,12 @@ fn draw_hud(
                         .selected_item
                         .as_ref()
                         .is_some_and(|s| s.item_id == item.item_id);
-                    if draw_library_item(ui, &item, selected, &thumbnails) {
+                    if draw_library_item(ui, &item, selected, &mut thumbnails) {
                         placement.selected_item = Some(item.clone());
                         placement.active_section = None;
                         placement.snap_placement_euler();
                         recent.push(item.clone());
-                        *mode = GameMode::Place;
+                        set_game_mode(&mut mode, &mut mode_events, GameMode::Place);
                     }
                 }
             }
@@ -358,7 +354,7 @@ fn draw_library_item(
     ui: &mut egui::Ui,
     item: &LibraryItemRef,
     selected: bool,
-    thumbnails: &ThumbnailCache,
+    thumbnails: &mut ThumbnailCache,
 ) -> bool {
     const THUMB: f32 = 40.0;
     let bg = if selected {
@@ -375,17 +371,37 @@ fn draw_library_item(
     if ui.is_rect_visible(rect) {
         ui.painter().rect_filled(rect, 4.0, bg);
 
-        // Thumbnail swatch.
         let thumb_rect = egui::Rect::from_min_size(
             rect.min + egui::vec2(4.0, 2.0),
             egui::vec2(THUMB, THUMB),
         );
-        let swatch = thumbnails.colors.get(&item.item_id).copied().unwrap_or([80, 80, 80, 255]);
-        ui.painter().rect_filled(
-            thumb_rect,
-            4.0,
-            egui::Color32::from_rgba_unmultiplied(swatch[0], swatch[1], swatch[2], swatch[3]),
-        );
+        let cache_key = library_item_cache_key(item);
+        if let Some(color_image) = thumbnails.images.get(&cache_key).cloned() {
+            let handle = thumbnails.texture_handles.entry(cache_key.clone()).or_insert_with(|| {
+                ui.ctx().load_texture(
+                    cache_key.clone(),
+                    color_image,
+                    egui::TextureOptions::LINEAR,
+                )
+            });
+            ui.painter().image(
+                handle.id(),
+                thumb_rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        } else {
+            let swatch = thumbnails
+                .colors
+                .get(&cache_key)
+                .copied()
+                .unwrap_or([80, 80, 80, 255]);
+            ui.painter().rect_filled(
+                thumb_rect,
+                4.0,
+                egui::Color32::from_rgba_unmultiplied(swatch[0], swatch[1], swatch[2], swatch[3]),
+            );
+        }
 
         // Name + section badge.
         let label = if item.section_spec_path.is_some() {
@@ -406,7 +422,9 @@ fn draw_library_item(
         );
     }
 
-    response.clicked()
+    response
+        .on_hover_text(format!("Mod: {}", item.mod_id))
+        .clicked()
 }
 
 /// Drawn after panels so it sits on top of the 3D view; converts window pixels to egui points.

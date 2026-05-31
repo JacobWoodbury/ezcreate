@@ -2,8 +2,11 @@ use bevy::prelude::*;
 
 use crate::{
     components::{FacePaintDecal, PlacedBlock, PlacedRoot},
-    resources::{GridConfig, GridEdit, OccupancyMap, PlacedBlockSnapshot, UndoStack},
-    systems::placement::spawn_block,
+    resources::{BindingId, GridConfig, GridEdit, KeyBindings, OccupancyMap, PlacedBlockSnapshot, UndoStack},
+    systems::{
+        paint::{apply_face_paint_snapshot, remove_face_paint_on_block},
+        placement::spawn_block,
+    },
 };
 
 pub struct UndoRedoPlugin;
@@ -17,17 +20,18 @@ impl Plugin for UndoRedoPlugin {
 fn handle_undo_redo(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
+    bindings: Res<KeyBindings>,
     mut undo: ResMut<UndoStack>,
     grid: Res<GridConfig>,
     mut occupancy: ResMut<OccupancyMap>,
     placed_root: Query<Entity, With<PlacedRoot>>,
     blocks: Query<Entity, With<PlacedBlock>>,
-    decals: Query<Entity, With<FacePaintDecal>>,
+    block_globals: Query<&GlobalTransform, With<PlacedBlock>>,
+    decals: Query<(Entity, &FacePaintDecal)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
-    if !ctrl {
+    if !KeyBindings::ctrl_pressed(&keys) {
         return;
     }
 
@@ -35,7 +39,7 @@ fn handle_undo_redo(
         return;
     };
 
-    if keys.just_pressed(KeyCode::KeyZ) {
+    if bindings.just_pressed(&keys, BindingId::Undo) {
         if let Some(edit) = undo.pop_undo() {
             apply_inverse(
                 &mut commands,
@@ -51,13 +55,14 @@ fn handle_undo_redo(
         }
     }
 
-    if keys.just_pressed(KeyCode::KeyY) {
+    if bindings.just_pressed(&keys, BindingId::Redo) {
         if let Some(edit) = undo.pop_redo() {
             apply_forward(
                 &mut commands,
                 &grid,
                 &mut occupancy,
                 &blocks,
+                &block_globals,
                 &decals,
                 root,
                 &mut meshes,
@@ -73,7 +78,7 @@ fn apply_inverse(
     grid: &GridConfig,
     occupancy: &mut OccupancyMap,
     blocks: &Query<Entity, With<PlacedBlock>>,
-    decals: &Query<Entity, With<FacePaintDecal>>,
+    decals: &Query<(Entity, &FacePaintDecal)>,
     root: Entity,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
@@ -95,9 +100,7 @@ fn apply_inverse(
             }
         }
         GridEdit::FacePaint { snapshot } => {
-            if decals.get(snapshot.decal_entity).is_ok() {
-                commands.entity(snapshot.decal_entity).despawn();
-            }
+            remove_face_paint_on_block(commands, decals, snapshot.parent_block, snapshot.face_normal);
         }
     }
 }
@@ -107,7 +110,8 @@ fn apply_forward(
     grid: &GridConfig,
     occupancy: &mut OccupancyMap,
     blocks: &Query<Entity, With<PlacedBlock>>,
-    decals: &Query<Entity, With<FacePaintDecal>>,
+    block_globals: &Query<&GlobalTransform, With<PlacedBlock>>,
+    decals: &Query<(Entity, &FacePaintDecal)>,
     root: Entity,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
@@ -129,9 +133,7 @@ fn apply_forward(
             }
         }
         GridEdit::FacePaint { snapshot } => {
-            if decals.get(snapshot.decal_entity).is_ok() {
-                commands.entity(snapshot.decal_entity).despawn();
-            }
+            apply_face_paint_snapshot(commands, meshes, materials, decals, block_globals, &snapshot);
         }
     }
 }

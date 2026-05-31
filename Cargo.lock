@@ -2747,6 +2747,7 @@ dependencies = [
  "bevy",
  "bevy_egui",
  "dirs",
+ "image",
  "log",
  "serde",
  "serde_json",

@@ -2,7 +2,10 @@ use bevy::prelude::*;
 use bevy_egui::EguiContexts;
 
 use crate::components::{PlacedBlock, SelectionOutline};
-use crate::resources::{GameMode, GridConfig, GridEdit, OccupancyMap, PlacedBlockSnapshot, SelectionState, UndoStack};
+use crate::resources::{
+    BindingId, GameMode, GridConfig, GridEdit, KeyBindings, OccupancyMap, PlacedBlockSnapshot,
+    SelectionState, UndoStack,
+};
 use crate::systems::raycast_util::{cursor_ray, raycast_placed_block};
 
 pub struct SelectionPlugin;
@@ -43,6 +46,7 @@ fn handle_selection_input(
     mode: Res<GameMode>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
+    bindings: Res<KeyBindings>,
     mut selection: ResMut<SelectionState>,
     grid: Res<GridConfig>,
     mut commands: Commands,
@@ -85,7 +89,7 @@ fn handle_selection_input(
 
     if mouse.just_released(MouseButton::Left) && selection.marquee_dragging {
         selection.marquee_dragging = false;
-        let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        let shift = KeyBindings::shift_pressed(&keys);
 
         if selection.marquee_drag_distance() > 8.0 {
             if let Some(rect) = selection.marquee_rect() {
@@ -118,7 +122,7 @@ fn handle_selection_input(
         selection.marquee_current = None;
     }
 
-    if keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) {
+    if bindings.delete_pressed(&keys) {
         delete_selection(
             &mut commands,
             &mut occupancy,
@@ -128,7 +132,7 @@ fn handle_selection_input(
         );
     }
 
-    if keys.just_pressed(KeyCode::KeyQ) {
+    if bindings.just_pressed(&keys, BindingId::RotateCcw) {
         rotate_selection_y(
             &mut commands,
             &mut occupancy,
@@ -138,7 +142,7 @@ fn handle_selection_input(
             -std::f32::consts::FRAC_PI_2,
         );
     }
-    if keys.just_pressed(KeyCode::KeyE) {
+    if bindings.just_pressed(&keys, BindingId::RotateCw) {
         rotate_selection_y(
             &mut commands,
             &mut occupancy,

@@ -49,6 +49,13 @@ pub fn block_face_center(block_center: Vec3, grid_size: f32, face_normal: Vec3) 
     block_center + face_normal * (grid_size * 0.5)
 }
 
+/// World-space transform for a face overlay (preview or painted decals).
+pub fn face_transform_world(face_center: Vec3, face_normal: Vec3, bias: f32) -> Transform {
+    let normal = face_normal.normalize();
+    Transform::from_translation(face_center + normal * bias)
+        .with_rotation(Quat::from_rotation_arc(Vec3::Y, normal))
+}
+
 /// Hover / paint tint: brush color blended with blue so the targeted face reads clearly.
 pub fn paint_preview_color(base: Color) -> Color {
     let mut s = base.to_srgba();

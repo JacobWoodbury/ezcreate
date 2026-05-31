@@ -12,6 +12,7 @@ dirs = "6.0.0"
 log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
 serde = "1.0.228"
 serde_json = "1.0.150"
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Faster dev runs: optimize dependencies, keep your code quick to compile
 [profile.dev]

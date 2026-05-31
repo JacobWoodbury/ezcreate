@@ -3,10 +3,14 @@ use bevy_egui::EguiContexts;
 
 use crate::{
     components::{FacePaintDecal, PaintPreview, PlacedBlock},
-    resources::{FacePaintSnapshot, GameMode, GridConfig, GridEdit, PaintState, StampPainter, UndoStack},
+    resources::{
+        FacePaintKind, FacePaintSnapshot, GameMode, GridConfig, GridEdit, PaintState, StampPainter,
+        UndoStack,
+    },
     systems::{
         raycast_util::{
-            block_face_center, cursor_ray, paint_preview_color, raycast_placed_block, snap_axis_normal,
+            block_face_center, cursor_ray, face_transform_world, paint_preview_color,
+            raycast_placed_block, snap_axis_normal,
         },
         stamp_mesh::{face_transform, spawn_stamp_decal},
     },
@@ -23,13 +27,48 @@ impl Plugin for PaintPlugin {
     }
 }
 
+/// Raycast the block face under the cursor; returns block entity, world face center, and normal.
+fn face_hit_under_cursor(
+    egui: &mut EguiContexts,
+    grid: &GridConfig,
+    spatial_query: &avian3d::prelude::SpatialQuery,
+    block_globals: &Query<&GlobalTransform, With<PlacedBlock>>,
+    blocks: &Query<Entity, With<PlacedBlock>>,
+    windows: &Query<&Window>,
+    cameras: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+) -> Option<crate::resources::PaintFaceHit> {
+    if egui.ctx_mut().is_ok_and(|ctx| ctx.is_pointer_over_area()) {
+        return None;
+    }
+
+    let window = windows.single().ok()?;
+    let (camera, cam_transform) = cameras.single().ok()?;
+    let ray = cursor_ray(window, camera, cam_transform)?;
+    let hit = raycast_placed_block(
+        spatial_query,
+        blocks,
+        ray.origin,
+        *ray.direction,
+        grid.ray_length,
+    )?;
+    let block_global = block_globals.get(hit.entity).ok()?;
+    let face_normal = snap_axis_normal(hit.normal);
+    let face_center = block_face_center(block_global.translation(), grid.grid_size, face_normal);
+
+    Some(crate::resources::PaintFaceHit {
+        block: hit.entity,
+        position: face_center,
+        normal: face_normal,
+    })
+}
+
 fn update_paint_hover(
     mut egui: EguiContexts,
     mode: Res<GameMode>,
     grid: Res<GridConfig>,
     mut paint: ResMut<PaintState>,
     spatial_query: avian3d::prelude::SpatialQuery,
-    block_transforms: Query<(Entity, &GlobalTransform), With<PlacedBlock>>,
+    block_globals: Query<&GlobalTransform, With<PlacedBlock>>,
     blocks: Query<Entity, With<PlacedBlock>>,
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -40,42 +79,15 @@ fn update_paint_hover(
         return;
     }
 
-    if egui.ctx_mut().is_ok_and(|ctx| ctx.is_pointer_over_area()) {
-        return;
-    }
-
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    let Ok((camera, cam_transform)) = cameras.single() else {
-        return;
-    };
-    let Some(ray) = cursor_ray(window, camera, cam_transform) else {
-        return;
-    };
-
-    let Some(hit) = raycast_placed_block(
+    paint.hover_hit = face_hit_under_cursor(
+        &mut egui,
+        &grid,
         &spatial_query,
+        &block_globals,
         &blocks,
-        ray.origin,
-        *ray.direction,
-        grid.ray_length,
-    ) else {
-        return;
-    };
-
-    let Ok((block, block_transform)) = block_transforms.get(hit.entity) else {
-        return;
-    };
-
-    let face_normal = snap_axis_normal(hit.normal);
-    let face_center = block_face_center(block_transform.translation(), grid.grid_size, face_normal);
-
-    paint.hover_hit = Some(crate::resources::PaintFaceHit {
-        block,
-        position: face_center,
-        normal: face_normal,
-    });
+        &windows,
+        &cameras,
+    );
 }
 
 fn sync_paint_preview(
@@ -117,9 +129,10 @@ fn sync_paint_preview(
             &mut materials,
             &alpha_stamp,
             hit.normal,
-            hit.position,
             face_size,
-            bias,
+            face_transform(hit.position, hit.normal, face_size, bias),
+            brush,
+            hit.block,
         );
         commands.entity(root).insert(PaintPreview);
     }
@@ -155,7 +168,7 @@ fn spawn_face_overlay(
         double_sided: true,
         ..default()
     });
-    let transform = face_transform(face_center, face_normal, face_size, bias);
+    let transform = face_transform_world(face_center, face_normal, bias);
     commands.spawn((
         PaintPreview,
         Mesh3d(mesh),
@@ -169,15 +182,18 @@ fn handle_face_paint(
     mut egui: EguiContexts,
     mode: Res<GameMode>,
     mouse: Res<ButtonInput<MouseButton>>,
-    paint: Res<PaintState>,
     stamp_painter: Res<StampPainter>,
     grid: Res<GridConfig>,
     mut commands: Commands,
     mut undo: ResMut<UndoStack>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    children: Query<&Children>,
     decals: Query<(Entity, &FacePaintDecal)>,
+    spatial_query: avian3d::prelude::SpatialQuery,
+    block_globals: Query<&GlobalTransform, With<PlacedBlock>>,
+    blocks: Query<Entity, With<PlacedBlock>>,
+    windows: Query<&Window>,
+    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
 ) {
     if *mode != GameMode::Paint || !mouse.just_pressed(MouseButton::Left) {
         return;
@@ -187,69 +203,134 @@ fn handle_face_paint(
         return;
     }
 
-    if egui.ctx_mut().is_ok_and(|ctx| ctx.is_pointer_over_area()) {
-        return;
-    }
-
-    let Some(hit) = paint.hover_hit else {
+    let Some(hit) = face_hit_under_cursor(
+        &mut egui,
+        &grid,
+        &spatial_query,
+        &block_globals,
+        &blocks,
+        &windows,
+        &cameras,
+    ) else {
         return;
     };
 
     let bias = grid.grid_size * 0.025;
     let face_size = grid.grid_size * 0.98;
     let brush = stamp_painter.brush_color_bevy();
+    let world_transform = face_transform_world(hit.position, hit.normal, bias);
 
-    clear_face_paint(&mut commands, &children, &decals, hit.block, hit.normal);
+    clear_face_paint(&mut commands, &decals, hit.block, hit.normal);
 
-    let decal = if stamp_painter.has_pattern_cutouts() {
+    if stamp_painter.has_pattern_cutouts() {
         spawn_stamp_decal(
             &mut commands,
             &mut meshes,
             &mut materials,
             &stamp_painter.stamp,
             hit.normal,
-            hit.position,
             face_size,
-            bias,
-        )
+            world_transform,
+            brush,
+            hit.block,
+        );
     } else {
         spawn_solid_face_decal(
             &mut commands,
             &mut meshes,
             &mut materials,
-            hit.position,
+            hit.block,
             hit.normal,
             face_size,
-            bias,
+            world_transform,
             brush,
-        )
+        );
+    }
+
+    let kind = if stamp_painter.has_pattern_cutouts() {
+        FacePaintKind::Stamp(stamp_painter.stamp.clone())
+    } else {
+        FacePaintKind::Solid
     };
 
-    commands.entity(hit.block).add_child(decal);
     undo.push(GridEdit::FacePaint {
         snapshot: FacePaintSnapshot {
             parent_block: hit.block,
-            decal_entity: decal,
             color: brush,
+            face_normal: hit.normal,
+            face_size,
+            bias,
+            kind,
         },
     });
 }
 
-fn clear_face_paint(
+/// Re-applies a face-paint edit (used by redo).
+pub fn apply_face_paint_snapshot(
     commands: &mut Commands,
-    children: &Query<&Children>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    decals: &Query<(Entity, &FacePaintDecal)>,
+    block_globals: &Query<&GlobalTransform, With<PlacedBlock>>,
+    snapshot: &FacePaintSnapshot,
+) {
+    clear_face_paint(commands, decals, snapshot.parent_block, snapshot.face_normal);
+
+    let Ok(block_global) = block_globals.get(snapshot.parent_block) else {
+        return;
+    };
+    let face_center =
+        block_face_center(block_global.translation(), snapshot.face_size, snapshot.face_normal);
+    let world_transform = face_transform_world(face_center, snapshot.face_normal, snapshot.bias);
+
+    match &snapshot.kind {
+        FacePaintKind::Solid => {
+            spawn_solid_face_decal(
+                commands,
+                meshes,
+                materials,
+                snapshot.parent_block,
+                snapshot.face_normal,
+                snapshot.face_size,
+                world_transform,
+                snapshot.color,
+            );
+        }
+        FacePaintKind::Stamp(stamp) => {
+            spawn_stamp_decal(
+                commands,
+                meshes,
+                materials,
+                stamp,
+                snapshot.face_normal,
+                snapshot.face_size,
+                world_transform,
+                snapshot.color,
+                snapshot.parent_block,
+            );
+        }
+    }
+}
+
+/// Removes any decal on `block` facing `face_normal` (used by undo).
+pub fn remove_face_paint_on_block(
+    commands: &mut Commands,
     decals: &Query<(Entity, &FacePaintDecal)>,
     block: Entity,
     face_normal: Vec3,
 ) {
-    let Ok(kids) = children.get(block) else {
-        return;
-    };
-    for child in kids.iter() {
-        let Ok((entity, decal)) = decals.get(child) else {
-            continue;
-        };
-        if decal.face_normal.dot(face_normal) > 0.9 {
+    clear_face_paint(commands, decals, block, face_normal);
+}
+
+fn clear_face_paint(
+    commands: &mut Commands,
+    decals: &Query<(Entity, &FacePaintDecal)>,
+    block: Entity,
+    face_normal: Vec3,
+) {
+    for (entity, decal) in decals.iter() {
+        if decal.parent_block == block && decal.face_normal.dot(face_normal) > 0.9 {
+            log::debug!("Replacing face paint (color {:?})", decal.color);
             commands.entity(entity).despawn();
         }
     }
@@ -259,15 +340,14 @@ fn spawn_solid_face_decal(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
-    face_center: Vec3,
+    parent_block: Entity,
     face_normal: Vec3,
     face_size: f32,
-    bias: f32,
+    world_transform: Transform,
     color: Color,
-) -> Entity {
+) {
     let half = face_size * 0.5;
     let mesh = meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(half)));
-    let rotation = Quat::from_rotation_arc(Vec3::Y, face_normal);
     let material = materials.add(StandardMaterial {
         base_color: color,
         unlit: true,
@@ -276,16 +356,15 @@ fn spawn_solid_face_decal(
         ..default()
     });
 
-    commands
-        .spawn((
-            FacePaintDecal {
-                color,
-                face_normal,
-            },
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-            Transform::from_translation(face_center + face_normal * bias).with_rotation(rotation),
-            Visibility::default(),
-        ))
-        .id()
+    commands.spawn((
+        FacePaintDecal {
+            color,
+            face_normal,
+            parent_block,
+        },
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        world_transform,
+        Visibility::default(),
+    ));
 }

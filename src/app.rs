@@ -1,8 +1,8 @@
 use crate::{
     content::ContentPlugin,
     resources::{
-        GameMode, GameModeChanged, OccupancyMap, PaintState, PlacementState, RecentPicks,
-        SelectionState, UndoStack,
+        GameMode, GameModeChanged, KeyBindings, OccupancyMap, PaintState, PlacementState,
+        RecentPicks, SelectionState, UndoStack,
     },
     systems::{
         camera_orbit::OrbitCameraPlugin, input_router::InputRouterPlugin,
@@ -21,6 +21,7 @@ impl Plugin for EzCreatePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameMode>()
             .init_resource::<crate::resources::GamePreferences>()
+            .init_resource::<KeyBindings>()
             .init_resource::<OccupancyMap>()
             .init_resource::<PlacementState>()
             .init_resource::<SelectionState>()

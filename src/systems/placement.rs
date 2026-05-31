@@ -6,8 +6,8 @@ use crate::{
     components::{GhostPreview, PlacedBlock, PlacedRoot},
     content::SectionBlueprintFile,
     resources::{
-        ActiveSection, GameMode, GridConfig, GridEdit, OccupancyMap, PlacementState,
-        PlacedBlockSnapshot, UndoStack,
+        ActiveSection, BindingId, GameMode, GridConfig, GridEdit, OccupancyMap,
+        GameInput, KeyBindings, PlacementState, PlacedBlockSnapshot, UndoStack,
     },
     systems::raycast_util::{cursor_ray, raycast_placed_block},
 };
@@ -152,7 +152,7 @@ fn section_footprint_valid(
         }
         true
     } else {
-        !occupancy.contains(anchor)
+        check_placement_valid(grid, occupancy, anchor)
     }
 }
 
@@ -247,8 +247,7 @@ fn handle_place_and_delete(
     mut commands: Commands,
     mode: Res<GameMode>,
     grid: Res<GridConfig>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    keys: Res<ButtonInput<KeyCode>>,
+    input: GameInput,
     mut placement: ResMut<PlacementState>,
     mut occupancy: ResMut<OccupancyMap>,
     mut undo: ResMut<UndoStack>,
@@ -262,10 +261,10 @@ fn handle_place_and_delete(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if *mode == GameMode::Place {
-        if keys.just_pressed(KeyCode::KeyQ) {
+        if input.bindings.just_pressed(&input.keys, BindingId::RotateCcw) {
             placement.rotate_yaw_reverse();
         }
-        if keys.just_pressed(KeyCode::KeyE) {
+        if input.bindings.just_pressed(&input.keys, BindingId::RotateCw) {
             placement.rotate_yaw_forward();
         }
     }
@@ -275,7 +274,7 @@ fn handle_place_and_delete(
     };
 
     if *mode == GameMode::Place
-        && mouse.just_pressed(MouseButton::Left)
+        && input.mouse.just_pressed(MouseButton::Left)
         && placement.placement_valid
     {
         if let Some(cell) = placement.anchor_cell {
@@ -323,8 +322,8 @@ fn handle_place_and_delete(
         }
     }
 
-    let delete_pressed =
-        mouse.just_pressed(MouseButton::Right) && keys.pressed(KeyCode::AltLeft);
+    let delete_pressed = input.mouse.just_pressed(MouseButton::Right)
+        && KeyBindings::alt_pressed(&input.keys);
 
     if delete_pressed {
         let Some(cell) = raycast_cell_under_cursor(

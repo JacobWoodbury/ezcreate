@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+use super::Stamp;
+
 #[derive(Clone)]
 pub struct PlacedBlockSnapshot {
     pub item_id: String,
@@ -9,10 +11,19 @@ pub struct PlacedBlockSnapshot {
 }
 
 #[derive(Clone)]
+pub enum FacePaintKind {
+    Solid,
+    Stamp(Stamp),
+}
+
+#[derive(Clone)]
 pub struct FacePaintSnapshot {
     pub parent_block: Entity,
-    pub decal_entity: Entity,
     pub color: Color,
+    pub face_normal: Vec3,
+    pub face_size: f32,
+    pub bias: f32,
+    pub kind: FacePaintKind,
 }
 
 #[derive(Clone)]
