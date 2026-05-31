@@ -1,0 +1,12 @@
+{
+  "id": "sample_pack",
+  "name": "Sample Pack",
+  "items": [
+    {
+      "id": "sample_block",
+      "displayName": "Sample Block",
+      "scenePath": "scenes/sample_block.glb",
+      "category": "Samples"
+    }
+  ]
+}
