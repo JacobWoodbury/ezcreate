@@ -92,6 +92,5 @@ fn on_mode_changed(
         }
         placement.ghost_entity = None;
         placement.anchor_cell = None;
-        placement.placement_valid = false;
     }
 }

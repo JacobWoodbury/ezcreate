@@ -15,7 +15,6 @@ pub struct PlacementState {
     pub active_section: Option<ActiveSection>,
     pub placement_euler: Vec3,
     pub anchor_cell: Option<IVec3>,
-    pub placement_valid: bool,
     /// Root ghost entity (single block or section pivot).
     pub ghost_entity: Option<Entity>,
 }
@@ -27,7 +26,6 @@ impl Default for PlacementState {
             active_section: None,
             placement_euler: Vec3::ZERO,
             anchor_cell: None,
-            placement_valid: false,
             ghost_entity: None,
         }
     }

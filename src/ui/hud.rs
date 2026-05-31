@@ -9,15 +9,18 @@ use crate::{
         register_grouped_module,
     },
     resources::{
-        set_game_mode, GameMode, GameModeChanged, GamePreferences, GridConfig, KeyBindings,
-        PaintState, PlacementState, RecentPicks, SelectionState, StampPainter, UndoStack,
+        set_game_mode, AppScreen, GameMode, GameModeChanged, GamePreferences, GridConfig,
+        KeyBindings, PaintState, PlacementState, RecentPicks, SelectionState, StampPainter,
+        UndoStack,
     },
     systems::{
         paint::delete_face_decal_with_undo,
         thumbnails::{library_item_cache_key, ThumbnailCache},
     },
     ui::{
+        ftue::draw_ftue,
         input_capture::UiInputCapture,
+        launch_menu::draw_launch_menu,
         settings::{draw_settings_window, SettingsUiState},
     },
 };
@@ -52,6 +55,7 @@ struct UiState {
     stamp_name_error: Option<String>,
     rename: Option<RenameTarget>,
     rename_error: Option<String>,
+    request_tutorial: bool,
 }
 
 pub struct UiPlugin;
@@ -59,19 +63,69 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiState>()
-            .add_systems(EguiPrimaryContextPass, (draw_hud, sync_ui_input_capture).chain());
+            .add_systems(EguiPrimaryContextPass, draw_launch_menu_system)
+            .add_systems(EguiPrimaryContextPass, draw_ftue_system)
+            .add_systems(EguiPrimaryContextPass, draw_hud.run_if(on_playing))
+            .add_systems(
+                EguiPrimaryContextPass,
+                apply_ui_navigation.after(draw_hud),
+            )
+            .add_systems(
+                EguiPrimaryContextPass,
+                sync_ui_input_capture.after(apply_ui_navigation),
+            );
+    }
+}
+
+fn on_playing(screen: Res<AppScreen>) -> bool {
+    matches!(*screen, AppScreen::Playing)
+}
+
+fn draw_launch_menu_system(
+    mut contexts: EguiContexts,
+    mut screen: ResMut<AppScreen>,
+    exit: MessageWriter<AppExit>,
+) {
+    if !matches!(*screen, AppScreen::LaunchMenu) {
+        return;
+    }
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    draw_launch_menu(ctx, screen.as_mut(), exit);
+}
+
+fn draw_ftue_system(
+    mut contexts: EguiContexts,
+    mut screen: ResMut<AppScreen>,
+    bindings: Res<KeyBindings>,
+) {
+    if !matches!(*screen, AppScreen::Ftue { .. }) {
+        return;
+    }
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    draw_ftue(ctx, screen.as_mut(), &bindings);
+}
+
+fn apply_ui_navigation(mut screen: ResMut<AppScreen>, mut ui_state: ResMut<UiState>) {
+    if ui_state.request_tutorial {
+        ui_state.request_tutorial = false;
+        AppScreen::start_ftue(screen.as_mut());
     }
 }
 
 fn sync_ui_input_capture(
     mut contexts: EguiContexts,
     mut capture: ResMut<UiInputCapture>,
+    screen: Res<AppScreen>,
     ui_state: Res<UiState>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
-    UiInputCapture::sync(ctx, ui_state.show_settings, &mut capture);
+    UiInputCapture::sync(ctx, &screen, ui_state.show_settings, &mut capture);
 }
 
 fn draw_hud(
@@ -118,6 +172,9 @@ fn draw_hud(
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("⚙ Settings").clicked() {
                     ui_state.show_settings = !ui_state.show_settings;
+                }
+                if ui.button("Help").clicked() {
+                    ui_state.request_tutorial = true;
                 }
             });
         });

@@ -1,3 +1,4 @@
+mod app_screen;
 mod game_mode;
 mod key_bindings;
 mod grid_config;
@@ -10,6 +11,7 @@ mod selection_state;
 mod stamp;
 mod undo_stack;
 
+pub use app_screen::{AppScreen, FTUE_STEPS};
 pub use game_mode::{set_game_mode, GameMode, GameModeChanged};
 pub use key_bindings::{BindingId, GameInput, KeyBindings};
 pub use grid_config::GridConfig;

@@ -22,6 +22,8 @@ impl Plugin for PaintPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<StampPainter>()
             .add_systems(Startup, load_saved_stamps)
+            .add_systems(PostUpdate, update_paint_hover.in_set(GameplayAfterUi))
+            .add_systems(PostUpdate, handle_face_paint.in_set(GameplayAfterUi))
             .add_systems(PostUpdate, sync_paint_preview.after(update_paint_hover));
     }
 }

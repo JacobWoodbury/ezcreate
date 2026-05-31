@@ -24,7 +24,7 @@ struct PlaceDeleteQueries<'w, 's> {
     blocks: Query<'w, 's, (Entity, &'static PlacedBlock, &'static GlobalTransform)>,
     block_entities: Query<'w, 's, Entity, With<PlacedBlock>>,
     decals: Query<'w, 's, (Entity, &'static FacePaintDecal)>,
-    spatial_query: SpatialQuery,
+    spatial_query: SpatialQuery<'w, 's>,
     windows: Query<'w, 's, &'static Window>,
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<Camera3d>>,
     meshes: ResMut<'w, Assets<Mesh>>,
@@ -34,9 +34,15 @@ struct PlaceDeleteQueries<'w, 's> {
 impl Plugin for PlacementPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, resolve_selected_section)
-            .add_systems(Update, sync_ghost_preview)
             .add_systems(PostUpdate, update_placement_target.in_set(GameplayAfterUi))
-            .add_systems(PostUpdate, handle_place_and_delete.in_set(GameplayAfterUi));
+            .add_systems(
+                PostUpdate,
+                (
+                    sync_ghost_preview.after(update_placement_target),
+                    handle_place_and_delete,
+                )
+                    .in_set(GameplayAfterUi),
+            );
     }
 }
 
@@ -92,7 +98,6 @@ fn update_placement_target(
     placed_blocks: Query<Entity, With<PlacedBlock>>,
 ) {
     placement.anchor_cell = None;
-    placement.placement_valid = false;
 
     if *mode != GameMode::Place || placement.selected_item.is_none() {
         return;
@@ -126,8 +131,9 @@ fn update_placement_target(
     let snapped = grid.snap_to_grid(world);
     let cell = grid.world_to_grid(snapped);
 
-    placement.anchor_cell = Some(cell);
-    placement.placement_valid = section_footprint_valid(&placement, &grid, &occupancy, cell);
+    if section_footprint_valid(&placement, &grid, &occupancy, cell) {
+        placement.anchor_cell = Some(cell);
+    }
 
     let _ = placed_blocks;
 }
@@ -164,7 +170,7 @@ fn section_footprint_valid(
         }
         true
     } else {
-        check_placement_valid(grid, occupancy, anchor)
+        !grid.prevent_overlapping || !occupancy.contains(anchor)
     }
 }
 
@@ -200,14 +206,8 @@ fn sync_ghost_preview(
     let yaw = placement.placement_euler.y;
     let rotation = Quat::from_rotation_y(yaw);
 
-    let ghost_color = if placement.placement_valid {
-        Color::srgba(0.35, 0.85, 0.45, 0.45)
-    } else {
-        Color::srgba(0.9, 0.25, 0.2, 0.45)
-    };
-
     let ghost_material = materials.add(StandardMaterial {
-        base_color: ghost_color,
+        base_color: Color::srgba(0.35, 0.85, 0.45, 0.45),
         unlit: true,
         alpha_mode: AlphaMode::Blend,
         ..default()
@@ -274,7 +274,7 @@ fn handle_place_and_delete(
         }
     }
 
-    let Ok(root) = placed_root.single() else {
+    let Ok(root) = world.placed_root.single() else {
         return;
     };
 
@@ -282,10 +282,7 @@ fn handle_place_and_delete(
         return;
     }
 
-    if *mode == GameMode::Place
-        && input.mouse.just_pressed(MouseButton::Left)
-        && placement.placement_valid
-    {
+    if *mode == GameMode::Place && input.mouse.just_pressed(MouseButton::Left) {
         if let Some(cell) = placement.anchor_cell {
             if let Some(ref section) = placement.active_section.clone() {
                 place_section(
@@ -293,28 +290,25 @@ fn handle_place_and_delete(
                     &grid,
                     &mut occupancy,
                     &mut undo,
-                    &mut meshes,
-                    &mut materials,
+                    &mut world.meshes,
+                    &mut world.materials,
                     root,
                     cell,
                     placement.placement_euler.y,
                     section,
                 );
             } else if let Some(item) = placement.selected_item.clone() {
-                if grid.prevent_overlapping && occupancy.contains(cell) {
-                    return;
-                }
-                let world = grid.grid_to_world(cell);
+                let world_pos = grid.grid_to_world(cell);
                 let rotation = Quat::from_rotation_y(placement.placement_euler.y);
                 let entity = spawn_block(
                     &mut commands,
-                    &mut meshes,
-                    &mut materials,
+                    &mut world.meshes,
+                    &mut world.materials,
                     root,
                     &item.item_id,
                     &item.scene_path,
                     cell,
-                    world,
+                    world_pos,
                     rotation,
                     grid.grid_size,
                 );
@@ -336,20 +330,24 @@ fn handle_place_and_delete(
 
     if delete_pressed {
         let Some(cell) = raycast_cell_under_cursor(
-            &grid, &windows, &cameras, &spatial_query, &block_entities,
+            &grid,
+            &world.windows,
+            &world.cameras,
+            &world.spatial_query,
+            &world.block_entities,
         ) else {
             return;
         };
 
         if let Some(entity) = occupancy.get(cell) {
-            if let Ok((_, block, transform)) = blocks.get(entity) {
+            if let Ok((_, block, transform)) = world.blocks.get(entity) {
                 let snapshot = PlacedBlockSnapshot {
                     item_id: block.item_id.clone(),
                     grid_key: block.grid_key,
                     rotation: transform.rotation(),
                     scene_path: block.scene_path.clone(),
                 };
-                remove_all_face_paint_on_block(&mut commands, &decals, entity);
+                remove_all_face_paint_on_block(&mut commands, &world.decals, entity);
                 commands.entity(entity).despawn();
                 occupancy.remove(cell);
                 undo.push(GridEdit::Delete { snapshot });
@@ -477,12 +475,4 @@ fn raycast_cell_under_cursor(
     let hit_pos = ray.origin + *ray.direction * hit.distance;
     let world = hit_pos + hit.normal * (grid.grid_size * 0.5);
     Some(grid.world_to_grid(grid.snap_to_grid(world)))
-}
-
-pub fn check_placement_valid(
-    grid: &GridConfig,
-    occupancy: &OccupancyMap,
-    cell: IVec3,
-) -> bool {
-    !grid.prevent_overlapping || !occupancy.contains(cell)
 }
