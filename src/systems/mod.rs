@@ -4,6 +4,7 @@ pub mod paint;
 pub mod placement;
 pub mod raycast_util;
 pub mod selection;
+pub mod stamp_mesh;
 pub mod thumbnails;
 pub mod undo_redo;
 pub mod world_setup;

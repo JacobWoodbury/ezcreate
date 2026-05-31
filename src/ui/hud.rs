@@ -3,7 +3,7 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use crate::{
     content::{LibraryCatalog, LibraryItemRef, register_grouped_module},
-    resources::{GameMode, GamePreferences, GridConfig, PaintState, PlacementState, RecentPicks, SelectionState},
+    resources::{GameMode, GamePreferences, GridConfig, PaintState, PlacementState, RecentPicks, SelectionState, StampPainter, DEFAULT_STAMP_SIZE},
     systems::thumbnails::ThumbnailCache,
 };
 
@@ -19,6 +19,8 @@ impl Plugin for UiPlugin {
 #[derive(Resource, Default)]
 struct UiState {
     show_settings: bool,
+    stamp_save_name: String,
+    stamp_name_error: Option<String>,
 }
 
 fn draw_hud(
@@ -27,6 +29,7 @@ fn draw_hud(
     mut grid: ResMut<GridConfig>,
     mut placement: ResMut<PlacementState>,
     mut paint: ResMut<PaintState>,
+    mut stamp_painter: ResMut<StampPainter>,
     mut recent: ResMut<RecentPicks>,
     mut prefs: ResMut<GamePreferences>,
     selection: Res<SelectionState>,
@@ -156,6 +159,11 @@ fn draw_hud(
                     }
                 }
             }
+
+            if *mode == GameMode::Paint {
+                ui.separator();
+                draw_stamp_editor(ui, &mut stamp_painter, &mut ui_state);
+            }
         });
     });
 
@@ -187,22 +195,17 @@ fn draw_hud(
                 }
                 GameMode::Paint => {
                     ui.separator();
-                    let srgba = paint.brush_color.to_srgba();
-                    let mut egui_color = egui::Color32::from_rgba_unmultiplied(
-                        (srgba.red * 255.0) as u8,
-                        (srgba.green * 255.0) as u8,
-                        (srgba.blue * 255.0) as u8,
-                        (srgba.alpha * 255.0) as u8,
-                    );
-                    if ui.color_edit_button_srgba(&mut egui_color).changed() {
-                        paint.brush_color = Color::srgba(
-                            egui_color.r() as f32 / 255.0,
-                            egui_color.g() as f32 / 255.0,
-                            egui_color.b() as f32 / 255.0,
-                            egui_color.a() as f32 / 255.0,
-                        );
+                    if stamp_painter.apply_mode {
+                        ui.label("Stamp mode · LMB apply to face");
+                        if ui.small_button("Edit stamp").clicked() {
+                            stamp_painter.apply_mode = false;
+                        }
+                    } else {
+                        ui.label("Edit stamp · click cells in sidebar · ↵ to apply");
+                        if ui.small_button("Apply mode").clicked() {
+                            stamp_painter.apply_mode = true;
+                        }
                     }
-                    ui.label("LMB paint face");
                 }
             }
             ui.separator();
@@ -211,6 +214,135 @@ fn draw_hud(
     });
 
     draw_marquee_overlay(ctx, &mode, &selection);
+}
+
+/// Stamp editor panel — shown in the sidebar when in Paint mode.
+fn draw_stamp_editor(ui: &mut egui::Ui, stamp_painter: &mut StampPainter, ui_state: &mut UiState) {
+    ui.heading("Stamp editor");
+
+    // Mode toggle.
+    ui.horizontal(|ui| {
+        if ui.selectable_label(!stamp_painter.apply_mode, "✏ Edit").clicked() {
+            stamp_painter.apply_mode = false;
+        }
+        if ui.selectable_label(stamp_painter.apply_mode, "🖌 Apply").clicked() {
+            stamp_painter.apply_mode = true;
+        }
+    });
+
+    ui.add_space(4.0);
+
+    // Brush color picker.
+    ui.horizontal(|ui| {
+        ui.label("Brush color:");
+        let [r, g, b, a] = stamp_painter.brush_color;
+        let mut egui_color = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
+        if ui.color_edit_button_srgba(&mut egui_color).changed() {
+            stamp_painter.brush_color = [egui_color.r(), egui_color.g(), egui_color.b(), egui_color.a()];
+        }
+    });
+
+    // Stamp size control.
+    ui.horizontal(|ui| {
+        ui.label("Size:");
+        let mut n = stamp_painter.stamp.width as i32;
+        if ui.add(egui::DragValue::new(&mut n).range(1..=16).speed(0.1)).changed() {
+            let n = n as usize;
+            stamp_painter.stamp.resize(n, n);
+        }
+        ui.label(format!("{}×{}", stamp_painter.stamp.width, stamp_painter.stamp.height));
+    });
+
+    ui.add_space(4.0);
+
+    // The pixel grid.
+    let cols = stamp_painter.stamp.width;
+    let rows = stamp_painter.stamp.height;
+    let cell = (220.0 / cols as f32).min(32.0).max(8.0);
+
+    egui::Grid::new("stamp_grid")
+        .spacing([1.0, 1.0])
+        .show(ui, |ui| {
+            for row in 0..rows {
+                for col in 0..cols {
+                    let [r, g, b, a] = stamp_painter.stamp.get(col, row);
+                    let color = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(cell, cell),
+                        egui::Sense::click(),
+                    );
+                    if ui.is_rect_visible(rect) {
+                        ui.painter().rect_filled(rect, 2.0, color);
+                        ui.painter().rect_stroke(
+                            rect,
+                            2.0,
+                            egui::Stroke::new(0.5, egui::Color32::from_gray(60)),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    if response.clicked() {
+                        stamp_painter.stamp.set(col, row, stamp_painter.brush_color);
+                    }
+                }
+                ui.end_row();
+            }
+        });
+
+    ui.add_space(4.0);
+
+    // Fill / clear controls.
+    ui.horizontal(|ui| {
+        if ui.button("Fill all").clicked() {
+            let color = stamp_painter.brush_color;
+            for px in &mut stamp_painter.stamp.pixels {
+                *px = color;
+            }
+        }
+        if ui.button("Clear").clicked() {
+            for px in &mut stamp_painter.stamp.pixels {
+                *px = [0, 0, 0, 0];
+            }
+        }
+    });
+
+    ui.separator();
+
+    // Save stamp.
+    ui.horizontal(|ui| {
+        ui.text_edit_singleline(&mut ui_state.stamp_save_name);
+        if ui.button("Save").clicked() {
+            if ui_state.stamp_save_name.trim().is_empty() {
+                ui_state.stamp_name_error = Some("Enter a name.".into());
+            } else {
+                match stamp_painter.save_stamp(ui_state.stamp_save_name.trim()) {
+                    Ok(()) => {
+                        ui_state.stamp_name_error = None;
+                        ui_state.stamp_save_name.clear();
+                    }
+                    Err(e) => {
+                        ui_state.stamp_name_error = Some(e);
+                    }
+                }
+            }
+        }
+        if ui.button("Reload saved").clicked() {
+            stamp_painter.reload_stamps();
+        }
+    });
+    if let Some(ref err) = ui_state.stamp_name_error {
+        ui.colored_label(egui::Color32::RED, err);
+    }
+
+    // Saved stamp list.
+    if !stamp_painter.saved_stamps.is_empty() {
+        ui.label("Saved stamps:");
+        let saved = stamp_painter.saved_stamps.clone();
+        for (name, saved_stamp) in saved {
+            if ui.small_button(&name).clicked() {
+                stamp_painter.stamp = saved_stamp;
+            }
+        }
+    }
 }
 
 /// Renders a library item row with a color swatch / thumbnail + label.

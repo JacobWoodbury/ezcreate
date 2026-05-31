@@ -1,15 +1,20 @@
 use bevy::prelude::*;
 use bevy_egui::EguiContexts;
 
-use crate::components::{FacePaintDecal, PaintPreview, PlacedBlock};
-use crate::resources::{FacePaintSnapshot, GameMode, GridConfig, GridEdit, PaintState, UndoStack};
-use crate::systems::raycast_util::{cursor_ray, raycast_placed_block};
+use crate::{
+    components::{FacePaintDecal, PaintPreview, PlacedBlock},
+    resources::{FacePaintSnapshot, GameMode, GridConfig, GridEdit, PaintState, StampPainter, UndoStack},
+    systems::{
+        raycast_util::{cursor_ray, raycast_placed_block},
+        stamp_mesh::{face_transform, spawn_stamp_decal},
+    },
+};
 
 pub struct PaintPlugin;
 
 impl Plugin for PaintPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.init_resource::<StampPainter>().add_systems(
             Update,
             (update_paint_hover, sync_paint_preview, handle_face_paint).chain(),
         );
@@ -67,6 +72,7 @@ fn update_paint_hover(
 fn sync_paint_preview(
     mode: Res<GameMode>,
     paint: Res<PaintState>,
+    stamp_painter: Res<StampPainter>,
     mut commands: Commands,
     previews: Query<Entity, With<PaintPreview>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -85,28 +91,47 @@ fn sync_paint_preview(
         return;
     };
 
-    let half = (grid.grid_size * 0.45).max(0.1);
-    let size = Vec2::splat(half * 2.0);
-    let mesh = meshes.add(Plane3d::new(Vec3::Y, size));
-    let mut preview_color = paint.brush_color.to_srgba();
-    preview_color.alpha *= 0.55;
-    let material = materials.add(StandardMaterial {
-        base_color: Color::from(preview_color),
-        unlit: true,
-        alpha_mode: AlphaMode::Blend,
-        double_sided: true,
-        ..default()
-    });
+    let bias = grid.grid_size * 0.02;
+    let face_size = grid.grid_size * 0.9;
 
-    let offset = hit.normal * grid.grid_size.max(0.01) * 0.02;
-    let rotation = Quat::from_rotation_arc(Vec3::Y, hit.normal);
+    if stamp_painter.apply_mode {
+        // Show a stamp preview: spawn pixel planes with reduced alpha under PaintPreview root.
+        let alpha_stamp = {
+            let mut s = stamp_painter.stamp.clone();
+            for px in &mut s.pixels {
+                px[3] = (px[3] / 2).max(60);
+            }
+            s
+        };
 
-    commands.spawn((
-        PaintPreview,
-        Mesh3d(mesh),
-        MeshMaterial3d(material),
-        Transform::from_translation(hit.position + offset).with_rotation(rotation),
-    ));
+        let root = spawn_stamp_decal(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &alpha_stamp,
+            hit.normal,
+            hit.position,
+            face_size,
+            bias,
+        );
+        commands.entity(root).insert(PaintPreview);
+    } else {
+        // Solid-color brush preview.
+        let half = face_size * 0.5;
+        let size = Vec2::splat(half * 2.0);
+        let mesh = meshes.add(Plane3d::new(Vec3::Y, size));
+        let mut preview_color = paint.brush_color.to_srgba();
+        preview_color.alpha *= 0.55;
+        let material = materials.add(StandardMaterial {
+            base_color: Color::from(preview_color),
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            double_sided: true,
+            ..default()
+        });
+        let transform = face_transform(hit.position, hit.normal, face_size, bias);
+        commands.spawn((PaintPreview, Mesh3d(mesh), MeshMaterial3d(material), transform));
+    }
 }
 
 fn handle_face_paint(
@@ -114,6 +139,7 @@ fn handle_face_paint(
     mode: Res<GameMode>,
     mouse: Res<ButtonInput<MouseButton>>,
     paint: Res<PaintState>,
+    stamp_painter: Res<StampPainter>,
     grid: Res<GridConfig>,
     mut commands: Commands,
     mut undo: ResMut<UndoStack>,
@@ -132,33 +158,45 @@ fn handle_face_paint(
         return;
     };
 
-    let half = (grid.grid_size * 0.45).max(0.1);
-    let size = Vec2::splat(half * 2.0);
-    let mesh = meshes.add(Plane3d::new(Vec3::Y, size));
-    let material = materials.add(StandardMaterial {
-        base_color: paint.brush_color,
-        unlit: true,
-        alpha_mode: AlphaMode::Blend,
-        double_sided: true,
-        ..default()
-    });
+    let bias = grid.grid_size * 0.025;
+    let face_size = grid.grid_size * 0.9;
 
-    let offset = hit.normal * grid.grid_size.max(0.01) * 0.02;
-    let rotation = Quat::from_rotation_arc(Vec3::Y, hit.normal);
-
-    let decal = commands
-        .spawn((
-            FacePaintDecal {
-                color: paint.brush_color,
-            },
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-            Transform::from_translation(hit.position + offset).with_rotation(rotation),
-        ))
-        .id();
+    let decal = if stamp_painter.apply_mode {
+        spawn_stamp_decal(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &stamp_painter.stamp,
+            hit.normal,
+            hit.position,
+            face_size,
+            bias,
+        )
+    } else {
+        // Solid-color paint.
+        let half = face_size * 0.5;
+        let size = Vec2::splat(half * 2.0);
+        let mesh = meshes.add(Plane3d::new(Vec3::Y, size));
+        let rotation = Quat::from_rotation_arc(Vec3::Y, hit.normal);
+        let material = materials.add(StandardMaterial {
+            base_color: paint.brush_color,
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            double_sided: true,
+            ..default()
+        });
+        commands
+            .spawn((
+                FacePaintDecal { color: paint.brush_color },
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::from_translation(hit.position + hit.normal * bias)
+                    .with_rotation(rotation),
+            ))
+            .id()
+    };
 
     commands.entity(hit.block).add_child(decal);
-
     undo.push(GridEdit::FacePaint {
         snapshot: FacePaintSnapshot {
             parent_block: hit.block,

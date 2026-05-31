@@ -6,6 +6,7 @@ mod placement_state;
 mod preferences;
 mod recent_picks;
 mod selection_state;
+mod stamp;
 mod undo_stack;
 
 pub use game_mode::{GameMode, GameModeChanged};
@@ -16,4 +17,5 @@ pub use placement_state::{ActiveSection, PlacementState};
 pub use preferences::GamePreferences;
 pub use recent_picks::RecentPicks;
 pub use selection_state::SelectionState;
+pub use stamp::{Stamp, StampPainter, DEFAULT_STAMP_SIZE};
 pub use undo_stack::{FacePaintSnapshot, GridEdit, PlacedBlockSnapshot, UndoStack};
