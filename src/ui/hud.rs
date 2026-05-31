@@ -2,8 +2,9 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use crate::{
-    content::{LibraryCatalog, register_grouped_module},
+    content::{LibraryCatalog, LibraryItemRef, register_grouped_module},
     resources::{GameMode, GamePreferences, GridConfig, PaintState, PlacementState, RecentPicks, SelectionState},
+    systems::thumbnails::ThumbnailCache,
 };
 
 pub struct UiPlugin;
@@ -30,6 +31,7 @@ fn draw_hud(
     mut prefs: ResMut<GamePreferences>,
     selection: Res<SelectionState>,
     mut catalog: ResMut<LibraryCatalog>,
+    thumbnails: Res<ThumbnailCache>,
     mut ui_state: ResMut<UiState>,
     blocks: Query<(Entity, &crate::components::PlacedBlock, &GlobalTransform)>,
 ) {
@@ -98,65 +100,63 @@ fn draw_hud(
     }
 
     // ── Left sidebar (library) ────────────────────────────────────────────────
-    egui::SidePanel::left("library").default_width(240.0).show(ctx, |ui| {
-        if !recent.items.is_empty() {
-            ui.heading("Recent");
-            for item in recent.items.clone() {
-                let selected = placement
-                    .selected_item
-                    .as_ref()
-                    .is_some_and(|s| s.item_id == item.item_id);
-                if ui.selectable_label(selected, &item.display_name).clicked() {
-                    placement.selected_item = Some(item.clone());
-                    placement.active_section = None;
-                    placement.snap_placement_euler();
-                    recent.push(item.clone());
-                    *mode = GameMode::Place;
-                }
-            }
-            ui.separator();
-        }
-
-        ui.heading("Library");
-        if catalog.items.is_empty() {
-            ui.label("No mod.json items found under assets/mods");
-        } else {
-            for item in catalog.items.clone() {
-                let selected = placement
-                    .selected_item
-                    .as_ref()
-                    .is_some_and(|s| s.item_id == item.item_id);
-                let label = if item.section_spec_path.is_some() {
-                    format!("📦 {}", item.display_name)
-                } else {
-                    item.display_name.clone()
-                };
-                if ui.selectable_label(selected, &label).clicked() {
-                    placement.selected_item = Some(item.clone());
-                    placement.active_section = None; // Will be resolved by resolve_selected_section.
-                    placement.snap_placement_euler();
-                    recent.push(item.clone());
-                    *mode = GameMode::Place;
-                }
-            }
-        }
-
-        if *mode == GameMode::Select {
-            ui.separator();
-            ui.heading("Blueprint");
-            ui.label("Save selection as reusable module (section JSON).");
-            if ui.button("Save selection as module").clicked() {
-                let name = format!("Module {}", selection.selected.len());
-                match register_grouped_module(&selection, &blocks, &grid, &name, &mut catalog) {
-                    Ok(item) => {
-                        recent.push(item);
+    egui::SidePanel::left("library").default_width(260.0).show(ctx, |ui| {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            if !recent.items.is_empty() {
+                ui.heading("Recent");
+                let recent_list = recent.items.clone();
+                for item in recent_list {
+                    let selected = placement
+                        .selected_item
+                        .as_ref()
+                        .is_some_and(|s| s.item_id == item.item_id);
+                    if draw_library_item(ui, &item, selected, &thumbnails) {
+                        placement.selected_item = Some(item.clone());
+                        placement.active_section = None;
+                        placement.snap_placement_euler();
+                        recent.push(item.clone());
+                        *mode = GameMode::Place;
                     }
-                    Err(err) => {
-                        warn!("Save module failed: {err}");
+                }
+                ui.separator();
+            }
+
+            ui.heading("Library");
+            if catalog.items.is_empty() {
+                ui.label("No mod.json items found under assets/mods");
+            } else {
+                for item in catalog.items.clone() {
+                    let selected = placement
+                        .selected_item
+                        .as_ref()
+                        .is_some_and(|s| s.item_id == item.item_id);
+                    if draw_library_item(ui, &item, selected, &thumbnails) {
+                        placement.selected_item = Some(item.clone());
+                        placement.active_section = None;
+                        placement.snap_placement_euler();
+                        recent.push(item.clone());
+                        *mode = GameMode::Place;
                     }
                 }
             }
-        }
+
+            if *mode == GameMode::Select {
+                ui.separator();
+                ui.heading("Blueprint");
+                ui.label("Save selection as reusable module (section JSON).");
+                if ui.button("Save selection as module").clicked() {
+                    let name = format!("Module {}", selection.selected.len());
+                    match register_grouped_module(&selection, &blocks, &grid, &name, &mut catalog) {
+                        Ok(item) => {
+                            recent.push(item);
+                        }
+                        Err(err) => {
+                            warn!("Save module failed: {err}");
+                        }
+                    }
+                }
+            }
+        });
     });
 
     // ── Bottom bar ─────────────────────────────────────────────────────────────
@@ -211,6 +211,63 @@ fn draw_hud(
     });
 
     draw_marquee_overlay(ctx, &mode, &selection);
+}
+
+/// Renders a library item row with a color swatch / thumbnail + label.
+/// Returns true if the row was clicked.
+fn draw_library_item(
+    ui: &mut egui::Ui,
+    item: &LibraryItemRef,
+    selected: bool,
+    thumbnails: &ThumbnailCache,
+) -> bool {
+    const THUMB: f32 = 40.0;
+    let bg = if selected {
+        egui::Color32::from_rgba_unmultiplied(90, 160, 255, 60)
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), THUMB + 4.0),
+        egui::Sense::click(),
+    );
+
+    if ui.is_rect_visible(rect) {
+        ui.painter().rect_filled(rect, 4.0, bg);
+
+        // Thumbnail swatch.
+        let thumb_rect = egui::Rect::from_min_size(
+            rect.min + egui::vec2(4.0, 2.0),
+            egui::vec2(THUMB, THUMB),
+        );
+        let swatch = thumbnails.colors.get(&item.item_id).copied().unwrap_or([80, 80, 80, 255]);
+        ui.painter().rect_filled(
+            thumb_rect,
+            4.0,
+            egui::Color32::from_rgba_unmultiplied(swatch[0], swatch[1], swatch[2], swatch[3]),
+        );
+
+        // Name + section badge.
+        let label = if item.section_spec_path.is_some() {
+            format!("📦 {}", item.display_name)
+        } else {
+            item.display_name.clone()
+        };
+        let text_rect = egui::Rect::from_min_size(
+            rect.min + egui::vec2(THUMB + 8.0, 2.0),
+            egui::vec2(rect.width() - THUMB - 12.0, THUMB),
+        );
+        ui.painter().text(
+            text_rect.left_center(),
+            egui::Align2::LEFT_CENTER,
+            &label,
+            egui::FontId::proportional(13.0),
+            ui.visuals().text_color(),
+        );
+    }
+
+    response.clicked()
 }
 
 /// Drawn after panels so it sits on top of the 3D view; converts window pixels to egui points.

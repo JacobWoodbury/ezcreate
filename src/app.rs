@@ -7,7 +7,7 @@ use crate::{
     systems::{
         camera_orbit::OrbitCameraPlugin, input_router::InputRouterPlugin,
         paint::PaintPlugin, placement::PlacementPlugin, selection::SelectionPlugin,
-        undo_redo::UndoRedoPlugin, world_setup::WorldSetupPlugin,
+        thumbnails::ThumbnailPlugin, undo_redo::UndoRedoPlugin, world_setup::WorldSetupPlugin,
     },
     ui::UiPlugin,
 };
@@ -37,6 +37,7 @@ impl Plugin for EzCreatePlugin {
                 PlacementPlugin,
                 SelectionPlugin,
                 PaintPlugin,
+                ThumbnailPlugin,
                 InputRouterPlugin,
                 UndoRedoPlugin,
                 UiPlugin,
