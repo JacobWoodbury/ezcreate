@@ -42,7 +42,7 @@
 }
 ```
 
-Offsets are **grid cells relative to anchor** (minimum cell when saved). Placement applies rigid rotation around the piece centroid before occupancy keys are computed.
+Offsets are **grid cells relative to anchor** (minimum cell when saved). Placement rotates around the **bottom corner** farthest from the footprint center (recomputed on each 90° rotation so the new bottom stays on the anchor).
 
 **Face paint:** `facePaints` stores per-face decoration in **block-local** axis normals (`localNormal`, each component −1, 0, or 1). `paintType` is `solid` (flat brush color) or `stamp` (pixel grid). Saved automatically when using **Save selection as module** in Select mode.
 

@@ -4,7 +4,7 @@ use bevy_egui::EguiContexts;
 
 use crate::{
     components::{GhostPreview, PlacedBlock, PlacedRoot},
-    content::SectionBlueprintFile,
+    content::{bottom_pivot_offset_for_yaw, SectionBlueprintFile},
     resources::{
         ActiveSection, BindingId, GameMode, GridConfig, GridEdit, OccupancyMap,
         GameInput, KeyBindings, PlacementState, PlacedBlockSnapshot, UndoStack,
@@ -59,22 +59,11 @@ fn resolve_selected_section(mut placement: ResMut<PlacementState>) {
         return;
     };
 
-    let count = blueprint.pieces.len() as f32;
-    let centroid_offset = if count > 0.0 {
-        let sum: Vec3 = blueprint
-            .pieces
-            .iter()
-            .map(|p| Vec3::new(p.offset[0] as f32, p.offset[1] as f32, p.offset[2] as f32))
-            .sum();
-        sum / count
-    } else {
-        Vec3::ZERO
-    };
+    placement.active_section = Some(ActiveSection { blueprint });
+}
 
-    placement.active_section = Some(ActiveSection {
-        blueprint,
-        centroid_offset,
-    });
+fn section_pivot(section: &ActiveSection, yaw: f32) -> Vec3 {
+    bottom_pivot_offset_for_yaw(&section.blueprint.pieces, yaw)
 }
 
 fn update_placement_target(
@@ -141,14 +130,20 @@ fn section_footprint_valid(
     if let Some(ref section) = placement.active_section {
         let yaw = placement.placement_euler.y;
         let rotation = Quat::from_rotation_y(yaw);
+        let pivot = section_pivot(section, yaw);
         for piece in &section.blueprint.pieces {
-            let local = Vec3::new(
+            let offset = Vec3::new(
                 piece.offset[0] as f32,
                 piece.offset[1] as f32,
                 piece.offset[2] as f32,
-            ) - section.centroid_offset;
-            let rotated = rotation * local + section.centroid_offset;
-            let cell = anchor + grid.world_to_grid(rotated * grid.grid_size);
+            );
+            let delta = rotation * (offset - pivot);
+            let cell = anchor
+                + IVec3::new(
+                    delta.x.round() as i32,
+                    delta.y.round() as i32,
+                    delta.z.round() as i32,
+                );
             if occupancy.contains(cell) {
                 return false;
             }
@@ -205,9 +200,8 @@ fn sync_ghost_preview(
     });
 
     if let Some(ref section) = placement.active_section.clone() {
-        // Section ghost: pivot at centroid, pieces around it.
-        let centroid = section.centroid_offset * grid.grid_size;
-        let pivot = commands
+        let pivot = section_pivot(section, yaw);
+        let pivot_entity = commands
             .spawn((
                 GhostPreview,
                 Transform::from_translation(anchor_world).with_rotation(rotation),
@@ -216,21 +210,21 @@ fn sync_ghost_preview(
             .id();
 
         for piece in &section.blueprint.pieces {
-            let local_offset = Vec3::new(
+            let offset = Vec3::new(
                 piece.offset[0] as f32,
                 piece.offset[1] as f32,
                 piece.offset[2] as f32,
-            ) * grid.grid_size
-                - centroid;
+            );
+            let local_offset = (offset - pivot) * grid.grid_size;
             let mesh = meshes.add(Cuboid::new(grid.grid_size, grid.grid_size, grid.grid_size));
             commands.spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(ghost_material.clone()),
                 Transform::from_translation(local_offset),
-                ChildOf(pivot),
+                ChildOf(pivot_entity),
             ));
         }
-        placement.ghost_entity = Some(pivot);
+        placement.ghost_entity = Some(pivot_entity);
     } else {
         // Single-block ghost.
         let mesh = meshes.add(Cuboid::new(grid.grid_size, grid.grid_size, grid.grid_size));
@@ -364,18 +358,18 @@ fn place_section(
     section: &ActiveSection,
 ) {
     let rotation = Quat::from_rotation_y(yaw);
-    let centroid = section.centroid_offset * grid.grid_size;
+    let pivot = section_pivot(section, yaw);
     let anchor_world = grid.grid_to_world(anchor);
     let mut snapshots = Vec::new();
 
     for piece in &section.blueprint.pieces {
-        let local_offset = Vec3::new(
+        let offset = Vec3::new(
             piece.offset[0] as f32,
             piece.offset[1] as f32,
             piece.offset[2] as f32,
-        ) * grid.grid_size
-            - centroid;
-        let world_pos = anchor_world + rotation * local_offset;
+        );
+        let world_pos =
+            anchor_world + rotation * ((offset - pivot) * grid.grid_size);
         let cell = grid.world_to_grid(world_pos);
 
         if grid.prevent_overlapping && occupancy.contains(cell) {

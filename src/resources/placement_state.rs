@@ -6,8 +6,6 @@ use crate::content::{LibraryItemRef, SectionBlueprintFile};
 #[derive(Clone)]
 pub struct ActiveSection {
     pub blueprint: SectionBlueprintFile,
-    /// Resolved centroid offset (computed from the piece offsets, in grid cells).
-    pub centroid_offset: Vec3,
 }
 
 #[derive(Resource)]

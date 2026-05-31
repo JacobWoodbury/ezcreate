@@ -9,8 +9,8 @@ When porting grouped modules and section blueprints from Godot, **ghost preview 
 
 ## Grouped module / section assembly
 
-1. Compute **centroid** of piece world positions (or offset positions for ghost).
-2. Insert a **rotation pivot** at that centroid.
+1. Compute **bottom pivot**: lowest Y layer of piece offsets (at current yaw), then the cell farthest from that layer's XZ center.
+2. Insert a **rotation pivot** at that bottom corner (the anchor cell sits on the pivot).
 3. Apply `placement_euler` to the pivot, not per-piece local spins.
 4. Register occupancy for **each piece cell** after rotation (`CollectGroupedModulePieceRoots` equivalent).
 
