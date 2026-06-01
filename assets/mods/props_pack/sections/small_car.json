@@ -1,0 +1,82 @@
+{
+  "pieces": [
+    {
+      "scenePath": "scenes/unit_cube.glb",
+      "itemId": "unit_cube",
+      "offset": [0, 0, 0],
+      "facePaints": [
+        { "localNormal": [0, -1, 0], "brushColor": [32, 32, 35, 255], "paintType": "solid" },
+        { "localNormal": [0, 1, 0], "brushColor": [155, 38, 34, 255], "paintType": "solid" },
+        { "localNormal": [1, 0, 0], "brushColor": [205, 52, 45, 255], "paintType": "solid" },
+        { "localNormal": [-1, 0, 0], "brushColor": [45, 45, 48, 255], "paintType": "solid" },
+        { "localNormal": [0, 0, 1], "brushColor": [32, 32, 35, 255], "paintType": "solid" },
+        { "localNormal": [0, 0, -1], "brushColor": [32, 32, 35, 255], "paintType": "solid" }
+      ]
+    },
+    {
+      "scenePath": "scenes/unit_cube.glb",
+      "itemId": "unit_cube",
+      "offset": [1, 0, 0],
+      "facePaints": [
+        { "localNormal": [0, -1, 0], "brushColor": [120, 30, 28, 255], "paintType": "solid" },
+        { "localNormal": [0, 1, 0], "brushColor": [220, 62, 52, 255], "paintType": "solid" },
+        { "localNormal": [1, 0, 0], "brushColor": [205, 52, 45, 255], "paintType": "solid" },
+        { "localNormal": [-1, 0, 0], "brushColor": [205, 52, 45, 255], "paintType": "solid" },
+        { "localNormal": [0, 0, 1], "brushColor": [185, 48, 42, 255], "paintType": "solid" },
+        { "localNormal": [0, 0, -1], "brushColor": [185, 48, 42, 255], "paintType": "solid" }
+      ]
+    },
+    {
+      "scenePath": "scenes/unit_cube.glb",
+      "itemId": "unit_cube",
+      "offset": [2, 0, 0],
+      "facePaints": [
+        { "localNormal": [0, -1, 0], "brushColor": [120, 30, 28, 255], "paintType": "solid" },
+        { "localNormal": [0, 1, 0], "brushColor": [220, 62, 52, 255], "paintType": "solid" },
+        { "localNormal": [1, 0, 0], "brushColor": [205, 52, 45, 255], "paintType": "solid" },
+        { "localNormal": [-1, 0, 0], "brushColor": [205, 52, 45, 255], "paintType": "solid" },
+        { "localNormal": [0, 0, 1], "brushColor": [185, 48, 42, 255], "paintType": "solid" },
+        { "localNormal": [0, 0, -1], "brushColor": [185, 48, 42, 255], "paintType": "solid" }
+      ]
+    },
+    {
+      "scenePath": "scenes/unit_cube.glb",
+      "itemId": "unit_cube",
+      "offset": [3, 0, 0],
+      "facePaints": [
+        { "localNormal": [0, -1, 0], "brushColor": [32, 32, 35, 255], "paintType": "solid" },
+        { "localNormal": [0, 1, 0], "brushColor": [240, 230, 180, 255], "paintType": "solid" },
+        { "localNormal": [1, 0, 0], "brushColor": [240, 230, 180, 255], "paintType": "solid" },
+        { "localNormal": [-1, 0, 0], "brushColor": [205, 52, 45, 255], "paintType": "solid" },
+        { "localNormal": [0, 0, 1], "brushColor": [32, 32, 35, 255], "paintType": "solid" },
+        { "localNormal": [0, 0, -1], "brushColor": [32, 32, 35, 255], "paintType": "solid" }
+      ]
+    },
+    {
+      "scenePath": "scenes/unit_cube.glb",
+      "itemId": "unit_cube",
+      "offset": [1, 1, 0],
+      "facePaints": [
+        { "localNormal": [0, 1, 0], "brushColor": [225, 68, 58, 255], "paintType": "solid" },
+        { "localNormal": [0, -1, 0], "brushColor": [205, 52, 45, 255], "paintType": "solid" },
+        { "localNormal": [1, 0, 0], "brushColor": [205, 52, 45, 255], "paintType": "solid" },
+        { "localNormal": [-1, 0, 0], "brushColor": [120, 175, 200, 255], "paintType": "solid" },
+        { "localNormal": [0, 0, 1], "brushColor": [120, 175, 200, 255], "paintType": "solid" },
+        { "localNormal": [0, 0, -1], "brushColor": [120, 175, 200, 255], "paintType": "solid" }
+      ]
+    },
+    {
+      "scenePath": "scenes/unit_cube.glb",
+      "itemId": "unit_cube",
+      "offset": [2, 1, 0],
+      "facePaints": [
+        { "localNormal": [0, 1, 0], "brushColor": [225, 68, 58, 255], "paintType": "solid" },
+        { "localNormal": [0, -1, 0], "brushColor": [205, 52, 45, 255], "paintType": "solid" },
+        { "localNormal": [1, 0, 0], "brushColor": [120, 175, 200, 255], "paintType": "solid" },
+        { "localNormal": [-1, 0, 0], "brushColor": [205, 52, 45, 255], "paintType": "solid" },
+        { "localNormal": [0, 0, 1], "brushColor": [120, 175, 200, 255], "paintType": "solid" },
+        { "localNormal": [0, 0, -1], "brushColor": [120, 175, 200, 255], "paintType": "solid" }
+      ]
+    }
+  ]
+}

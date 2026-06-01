@@ -93,7 +93,7 @@ fn on_mode_changed(
         for ghost in &ghosts {
             commands.entity(ghost).despawn();
         }
-        placement.ghost_entity = None;
+        placement.clear_ghost_cache();
         placement.anchor_cell = None;
         placement.ghost_pivot_world = None;
         placement.placement_allowed = false;

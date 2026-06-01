@@ -133,10 +133,54 @@ pub fn placement_anchor_cell(
 }
 
 /// World-space transform for a face overlay (preview or painted decals).
-pub fn face_transform_world(face_center: Vec3, face_normal: Vec3, bias: f32) -> Transform {
+///
+/// Stamp plane axes match the editor grid: columns → local +X, rows → local +Z
+/// (row 0 is the top row in the editor). `stamp_rotation_quarters` twists around
+/// the face normal in 90° steps (Q/E in Paint mode).
+pub fn face_transform_world(
+    face_center: Vec3,
+    face_normal: Vec3,
+    block_rotation: Quat,
+    bias: f32,
+    stamp_rotation_quarters: i32,
+) -> Transform {
     let normal = face_normal.normalize();
-    Transform::from_translation(face_center + normal * bias)
-        .with_rotation(Quat::from_rotation_arc(Vec3::Y, normal))
+    let local_normal = snap_axis_normal(block_rotation.inverse() * normal);
+    let (local_col, local_row) = block_local_stamp_axes(local_normal);
+
+    let world_col = (block_rotation * local_col).normalize_or_zero();
+    let world_row = (block_rotation * local_row).normalize_or_zero();
+
+    let mut basis = Mat3::from_cols(world_col, normal, world_row);
+    if basis.determinant() < 0.0 {
+        basis.z_axis = -basis.z_axis;
+    }
+
+    let twist = Quat::from_axis_angle(
+        normal,
+        (stamp_rotation_quarters.rem_euclid(4)) as f32 * std::f32::consts::FRAC_PI_2,
+    );
+    let rotation = twist * Quat::from_mat3(&basis);
+
+    Transform::from_translation(face_center + normal * bias).with_rotation(rotation)
+}
+
+/// Column (+X) and row (+Z) directions on the stamp plane, in block-local space.
+fn block_local_stamp_axes(local_normal: Vec3) -> (Vec3, Vec3) {
+    let n = snap_axis_normal(local_normal);
+    if n.y > 0.5 {
+        (Vec3::X, Vec3::Z)
+    } else if n.y < -0.5 {
+        (Vec3::X, Vec3::NEG_Z)
+    } else if n.x > 0.5 {
+        (Vec3::NEG_Z, Vec3::Y)
+    } else if n.x < -0.5 {
+        (Vec3::Z, Vec3::Y)
+    } else if n.z > 0.5 {
+        (Vec3::X, Vec3::Y)
+    } else {
+        (Vec3::NEG_X, Vec3::Y)
+    }
 }
 
 /// Hover / paint tint: brush color blended with blue so the targeted face reads clearly.

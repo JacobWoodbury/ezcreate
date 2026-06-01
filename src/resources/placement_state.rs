@@ -24,6 +24,8 @@ pub struct PlacementState {
     pub placement_allowed: bool,
     /// Root ghost entity (single block or section pivot).
     pub ghost_entity: Option<Entity>,
+    /// Cached preview state to avoid despawn/spawn every frame.
+    pub ghost_signature: Option<u64>,
 }
 
 impl Default for PlacementState {
@@ -37,7 +39,46 @@ impl Default for PlacementState {
             ghost_pivot_world: None,
             placement_allowed: false,
             ghost_entity: None,
+            ghost_signature: None,
         }
+    }
+}
+
+impl PlacementState {
+    pub fn clear_ghost_cache(&mut self) {
+        self.ghost_entity = None;
+        self.ghost_signature = None;
+    }
+
+    pub fn block_ghost_signature(&self) -> Option<u64> {
+        let anchor = self.anchor_cell?;
+        let mut sig = anchor.x as u64;
+        sig = sig.wrapping_mul(31).wrapping_add(anchor.y as u64);
+        sig = sig.wrapping_mul(31).wrapping_add(anchor.z as u64);
+        sig = sig.wrapping_mul(31).wrapping_add(self.placement_allowed as u64);
+        sig = sig
+            .wrapping_mul(31)
+            .wrapping_add(self.placement_euler.y.to_bits() as u64);
+        sig = sig
+            .wrapping_mul(31)
+            .wrapping_add(self.active_section.is_some() as u64);
+        if let Some(pivot) = self.ghost_pivot_world {
+            sig = sig.wrapping_mul(31).wrapping_add(pivot.x.to_bits() as u64);
+            sig = sig.wrapping_mul(31).wrapping_add(pivot.y.to_bits() as u64);
+            sig = sig.wrapping_mul(31).wrapping_add(pivot.z.to_bits() as u64);
+        }
+        Some(sig)
+    }
+
+    pub fn placeable_ghost_signature(&self, placeable_id: &str) -> Option<u64> {
+        let anchor = self.anchor_cell?;
+        let mut sig = anchor.x as u64;
+        sig = sig.wrapping_mul(31).wrapping_add(anchor.y as u64);
+        sig = sig.wrapping_mul(31).wrapping_add(anchor.z as u64);
+        for b in placeable_id.bytes() {
+            sig = sig.wrapping_mul(31).wrapping_add(b as u64);
+        }
+        Some(sig)
     }
 }
 

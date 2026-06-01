@@ -2,7 +2,7 @@ use crate::{
     content::ContentPlugin,
     resources::{
         GameMode, GameModeChanged, KeyBindings, OccupancyMap, PaintState, PlacementState,
-        PlayCharacterRegistry, PlaySession, PlaySessionStorage, PlayWorldState, RecentPicks,
+        PlayCharacterRegistry, PlayCharacterEditor, PlaySession, PlaySessionStorage, PlayWorldState, RecentPicks,
         PlaceableRegistry, SelectionState, UndoStack, AppScreen,
     },
     systems::{
@@ -35,6 +35,7 @@ impl Plugin for EzCreatePlugin {
             .init_resource::<PlayWorldState>()
             .init_resource::<PlaySessionStorage>()
             .init_resource::<PlayCharacterRegistry>()
+            .init_resource::<PlayCharacterEditor>()
             .init_resource::<PlaceableRegistry>()
             .add_message::<GameModeChanged>();
         configure_gameplay_after_ui(app);

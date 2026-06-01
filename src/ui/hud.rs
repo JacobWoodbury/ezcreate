@@ -9,8 +9,9 @@ use crate::{
         register_grouped_module,
     },
     resources::{
-        set_game_mode, AppScreen, GameMode, GameModeChanged, GamePreferences, GridConfig,
-        KeyBindings, PaintState, PlacementState, PlaceableRegistry, PlaySession, PlayUiActions,
+        set_game_mode, sync_placeables_from_characters, AppScreen, GameMode, GameModeChanged,
+        GamePreferences, GridConfig, KeyBindings, PaintState, PlaceableId, PlacementState,
+        PlaceableRegistry, PlayCharacterEditor, PlayCharacterRegistry, PlaySession, PlayUiActions,
         PlayWorldState, RecentPicks, SelectionState, StampPainter, UndoStack,
     },
     systems::{
@@ -56,7 +57,9 @@ struct HudPlayState<'w> {
     session: Res<'w, PlaySession>,
     play_world: Res<'w, PlayWorldState>,
     play_actions: ResMut<'w, PlayUiActions>,
-    placeables: Res<'w, PlaceableRegistry>,
+    placeables: ResMut<'w, PlaceableRegistry>,
+    characters: ResMut<'w, PlayCharacterRegistry>,
+    editor: ResMut<'w, PlayCharacterEditor>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -319,35 +322,7 @@ fn draw_hud(
     egui::SidePanel::left("library").default_width(260.0).show(ctx, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {
             if *mode == GameMode::Play {
-                ui.heading("Place");
-                ui.label("Select a placeable, then click the ground to place it.");
-                for def in &play.placeables.items {
-                    let selected = placement
-                        .selected_placeable
-                        .as_ref()
-                        .is_some_and(|id| *id == def.id);
-                    if ui.selectable_label(selected, &def.label).clicked() {
-                        placement.select_placeable(def.id.clone());
-                    }
-                }
-                ui.add_space(8.0);
-                if play.play_world.active_character.is_some() {
-                    if ui.button("Remove character").clicked() {
-                        play.play_actions.remove_character = true;
-                    }
-                }
-                ui.add_space(8.0);
-                let has_character = play.play_world.active_character.is_some();
-                if has_character {
-                    if ui.button("▶ Play").clicked() {
-                        play.play_actions.start_session = true;
-                    }
-                } else {
-                    ui.add_enabled_ui(false, |ui| {
-                        let _ = ui.button("▶ Play");
-                    });
-                    ui.label("Place a character first.");
-                }
+                draw_play_character_panel(ui, &mut placement, &mut play);
                 ui.separator();
             }
 
@@ -493,7 +468,10 @@ fn draw_hud(
                 GameMode::Paint => {
                     ui.separator();
                     if stamp_painter.apply_mode {
-                        ui.label("LMB applies stamp grid · Clear = solid brush color");
+                        ui.label(format!(
+                            "LMB applies stamp · Q/E rotate ({}°) · Clear = solid brush",
+                            stamp_painter.stamp_rotation_quarters * 90
+                        ));
                         if ui.small_button("Edit stamp").clicked() {
                             stamp_painter.apply_mode = false;
                         }
@@ -506,7 +484,7 @@ fn draw_hud(
                 }
                 GameMode::Play => {
                     ui.separator();
-                    ui.label("Select placeable · LMB on ground · ▶ Play · Esc to exit session");
+                    ui.label("Pick character · edit settings · LMB place · ▶ Play");
                 }
             }
             ui.separator();
@@ -940,6 +918,166 @@ fn draw_library_item(
     });
 
     action
+}
+
+fn draw_play_character_panel(
+    ui: &mut egui::Ui,
+    placement: &mut PlacementState,
+    play: &mut HudPlayState,
+) {
+    ui.heading("Characters");
+    ui.label("Select a character, adjust settings, save, then click the ground to place.");
+
+    let presets: Vec<_> = play.characters.presets().to_vec();
+    for preset in &presets {
+        let selected = play.editor.selected_id.as_deref() == Some(preset.id.as_str());
+        if ui.selectable_label(selected, &preset.name).clicked() {
+            play.editor.select_preset(preset);
+            placement.select_placeable(PlaceableId(preset.id.clone()));
+        }
+    }
+
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label("New:");
+        ui.text_edit_singleline(&mut play.editor.new_name_buffer);
+        if ui.button("Create").clicked() {
+            let name = play.editor.new_name_buffer.trim();
+            if name.is_empty() {
+                play.editor.error = Some("Enter a name for the new character.".into());
+            } else {
+                let preset = crate::resources::PlayCharacterPreset::new_unique(name);
+                match play.characters.upsert_preset(preset.clone()) {
+                    Ok(()) => {
+                        sync_placeables_from_characters(&play.characters, &mut play.placeables);
+                        play.editor.select_preset(&preset);
+                        placement.select_placeable(PlaceableId(preset.id.clone()));
+                        play.editor.new_name_buffer.clear();
+                        play.editor.error = None;
+                    }
+                    Err(err) => play.editor.error = Some(err),
+                }
+            }
+        }
+    });
+
+    let mut save_clicked = false;
+    let mut delete_clicked = false;
+
+    if let Some(draft) = play.editor.draft.as_mut() {
+        ui.separator();
+        ui.heading("Settings");
+        ui.label("Name");
+        ui.text_edit_singleline(&mut draft.name);
+        ui.add(
+            egui::Slider::new(&mut draft.move_speed, 1.0..=20.0).text("Move speed"),
+        );
+        ui.add(
+            egui::Slider::new(&mut draft.jump_speed, 2.0..=15.0).text("Jump height"),
+        );
+        ui.add(
+            egui::Slider::new(&mut draft.linear_damping, 0.0..=20.0).text("Damping"),
+        );
+        ui.add(
+            egui::Slider::new(&mut draft.capsule_radius, 0.2..=0.8).text("Capsule radius"),
+        );
+        ui.add(
+            egui::Slider::new(&mut draft.capsule_half_height, 0.3..=1.2)
+                .text("Capsule height"),
+        );
+        ui.horizontal(|ui| {
+            ui.label("Color");
+            ui.add(
+                egui::DragValue::new(&mut draft.color_rgb[0])
+                    .speed(0.01)
+                    .range(0.0..=1.0)
+                    .prefix("R "),
+            );
+            ui.add(
+                egui::DragValue::new(&mut draft.color_rgb[1])
+                    .speed(0.01)
+                    .range(0.0..=1.0)
+                    .prefix("G "),
+            );
+            ui.add(
+                egui::DragValue::new(&mut draft.color_rgb[2])
+                    .speed(0.01)
+                    .range(0.0..=1.0)
+                    .prefix("B "),
+            );
+        });
+
+        let is_builtin = draft.is_builtin;
+        ui.horizontal(|ui| {
+            save_clicked = ui.button("Save").clicked();
+            if !is_builtin {
+                delete_clicked = ui.button("Delete").clicked();
+            }
+        });
+    }
+
+    if save_clicked {
+        if let Some(d) = play.editor.draft.as_ref() {
+            if d.name.trim().is_empty() {
+                play.editor.error = Some("Name is required.".into());
+            } else {
+                let preset = d.to_preset();
+                let id = d.id.clone();
+                match play.characters.upsert_preset(preset) {
+                    Ok(()) => {
+                        sync_placeables_from_characters(&play.characters, &mut play.placeables);
+                        if let Some(saved) = play.characters.preset(&id) {
+                            play.editor.select_preset(saved);
+                            placement.select_placeable(PlaceableId(saved.id.clone()));
+                        }
+                        play.editor.error = None;
+                    }
+                    Err(err) => play.editor.error = Some(err),
+                }
+            }
+        }
+    } else if delete_clicked {
+        if let Some(id) = play.editor.draft.as_ref().map(|d| d.id.clone()) {
+            match play.characters.delete_preset(&id) {
+                Ok(()) => {
+                    sync_placeables_from_characters(&play.characters, &mut play.placeables);
+                    placement.clear_placeable();
+                    if let Some(first) = play.characters.presets().first() {
+                        play.editor.select_preset(first);
+                        placement.select_placeable(PlaceableId(first.id.clone()));
+                    } else {
+                        play.editor.draft = None;
+                        play.editor.selected_id = None;
+                    }
+                    play.editor.error = None;
+                }
+                Err(err) => play.editor.error = Some(err),
+            }
+        }
+    }
+
+    if let Some(err) = &play.editor.error {
+        ui.colored_label(egui::Color32::RED, err);
+    }
+
+    ui.separator();
+    ui.heading("Session");
+    if play.play_world.active_character.is_some() {
+        if ui.button("Remove character").clicked() {
+            play.play_actions.remove_character = true;
+        }
+    }
+    let has_character = play.play_world.active_character.is_some();
+    if has_character {
+        if ui.button("▶ Play").clicked() {
+            play.play_actions.start_session = true;
+        }
+    } else {
+        ui.add_enabled_ui(false, |ui| {
+            let _ = ui.button("▶ Play");
+        });
+        ui.label("Place a character first.");
+    }
 }
 
 /// Drawn after panels; marquee coords are window logical pixels (same as Bevy cursor / world_to_viewport).

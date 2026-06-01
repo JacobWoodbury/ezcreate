@@ -188,6 +188,21 @@ fn section_footprint_valid(
     }
 }
 
+fn clear_ghost_previews(
+    commands: &mut Commands,
+    ghosts: &Query<Entity, With<GhostPreview>>,
+    placement: &mut PlacementState,
+) {
+    if placement.ghost_entity.is_none() && ghosts.is_empty() {
+        placement.clear_ghost_cache();
+        return;
+    }
+    for entity in ghosts.iter() {
+        commands.entity(entity).despawn();
+    }
+    placement.clear_ghost_cache();
+}
+
 fn sync_ghost_preview(
     mode: Res<GameMode>,
     grid: Res<GridConfig>,
@@ -206,18 +221,17 @@ fn sync_ghost_preview(
         && placement.anchor_cell.is_some();
 
     if !show {
-        for entity in &ghosts {
-            commands.entity(entity).despawn();
-        }
-        placement.ghost_entity = None;
+        clear_ghost_previews(&mut commands, &ghosts, &mut placement);
         return;
     }
 
-    // Always rebuild when state changes — despawn old first.
-    for entity in &ghosts {
-        commands.entity(entity).despawn();
+    if let Some(sig) = placement.block_ghost_signature() {
+        if placement.ghost_signature == Some(sig) && placement.ghost_entity.is_some() {
+            return;
+        }
     }
-    placement.ghost_entity = None;
+
+    clear_ghost_previews(&mut commands, &ghosts, &mut placement);
 
     let cell = placement.anchor_cell.unwrap();
     let anchor_world = placement
@@ -278,6 +292,8 @@ fn sync_ghost_preview(
             .id();
         placement.ghost_entity = Some(entity);
     }
+
+    placement.ghost_signature = placement.block_ghost_signature();
 }
 
 fn handle_place_and_delete(

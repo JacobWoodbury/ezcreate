@@ -16,6 +16,7 @@ pub fn spawn_stamp_decal(
     world_transform: Transform,
     decal_color: Color,
     parent_block: Entity,
+    stamp_rotation_quarters: i32,
 ) -> Entity {
     let cols = stamp.width as f32;
     let rows = stamp.height as f32;
@@ -31,7 +32,9 @@ pub fn spawn_stamp_decal(
                 parent_block,
                 kind: FacePaintKind::Stamp {
                     stamp: stamp.clone(),
+                    rotation_quarters: stamp_rotation_quarters,
                 },
+                stamp_rotation_quarters,
             },
             world_transform,
             Visibility::default(),
@@ -77,9 +80,4 @@ pub fn spawn_stamp_decal(
     }
 
     root
-}
-
-/// Returns a world-space `Transform` for a face overlay (hover preview).
-pub fn face_transform(hit_pos: Vec3, face_normal: Vec3, _face_size: f32, bias: f32) -> Transform {
-    crate::systems::raycast_util::face_transform_world(hit_pos, face_normal, bias)
 }

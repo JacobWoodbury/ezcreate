@@ -3,15 +3,15 @@ use bevy::prelude::*;
 use crate::{
     components::{FacePaintDecal, PaintPreview, PlacedBlock},
     resources::{
-        FacePaintKind, FacePaintSnapshot, GameMode, GridConfig, GridEdit, PaintState, StampPainter,
-        UndoStack,
+        BindingId, FacePaintKind, FacePaintSnapshot, GameMode, GridConfig, GridEdit, KeyBindings,
+        PaintState, StampPainter, UndoStack,
     },
     systems::{
         raycast_util::{
             block_face_center, cursor_ray, face_transform_world, paint_preview_color,
             raycast_placed_block, snap_axis_normal,
         },
-        stamp_mesh::{face_transform, spawn_stamp_decal},
+        stamp_mesh::spawn_stamp_decal,
     },
     ui::{GameplayAfterUi, UiInputCapture},
 };
@@ -23,6 +23,7 @@ impl Plugin for PaintPlugin {
         app.init_resource::<StampPainter>()
             .add_systems(Startup, load_saved_stamps)
             .add_systems(PostUpdate, update_paint_hover.in_set(GameplayAfterUi))
+            .add_systems(PostUpdate, handle_stamp_rotation.in_set(GameplayAfterUi))
             .add_systems(PostUpdate, handle_face_paint.in_set(GameplayAfterUi))
             .add_systems(PostUpdate, sync_paint_preview.after(update_paint_hover));
     }
@@ -95,6 +96,52 @@ fn update_paint_hover(
     );
 }
 
+fn block_rotation_at(
+    block_globals: &Query<&GlobalTransform, With<PlacedBlock>>,
+    block: Entity,
+) -> Quat {
+    block_globals
+        .get(block)
+        .map(|t| t.rotation())
+        .unwrap_or(Quat::IDENTITY)
+}
+
+fn face_overlay_transform(
+    block_globals: &Query<&GlobalTransform, With<PlacedBlock>>,
+    block: Entity,
+    face_center: Vec3,
+    face_normal: Vec3,
+    bias: f32,
+    stamp_rotation_quarters: i32,
+) -> Transform {
+    face_transform_world(
+        face_center,
+        face_normal,
+        block_rotation_at(block_globals, block),
+        bias,
+        stamp_rotation_quarters,
+    )
+}
+
+fn handle_stamp_rotation(
+    capture: Res<UiInputCapture>,
+    mode: Res<GameMode>,
+    keys: Res<ButtonInput<KeyCode>>,
+    bindings: Res<KeyBindings>,
+    mut stamp_painter: ResMut<StampPainter>,
+) {
+    if *mode != GameMode::Paint || !stamp_painter.apply_mode || capture.block_game_keyboard {
+        return;
+    }
+
+    if bindings.just_pressed(&keys, BindingId::RotateCcw) {
+        stamp_painter.rotate_stamp_ccw();
+    }
+    if bindings.just_pressed(&keys, BindingId::RotateCw) {
+        stamp_painter.rotate_stamp_cw();
+    }
+}
+
 fn sync_paint_preview(
     mode: Res<GameMode>,
     paint: Res<PaintState>,
@@ -104,6 +151,7 @@ fn sync_paint_preview(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     grid: Res<GridConfig>,
+    block_globals: Query<&GlobalTransform, With<PlacedBlock>>,
 ) {
     for entity in &previews {
         commands.entity(entity).despawn();
@@ -136,9 +184,17 @@ fn sync_paint_preview(
                 &preview_stamp,
                 hit.normal,
                 face_size,
-                face_transform(hit.position, hit.normal, face_size, bias),
+                face_overlay_transform(
+                    &block_globals,
+                    hit.block,
+                    hit.position,
+                    hit.normal,
+                    bias,
+                    stamp_painter.stamp_rotation_quarters,
+                ),
                 brush,
                 hit.block,
+                stamp_painter.stamp_rotation_quarters,
             );
             commands.entity(root).insert(PaintPreview);
         } else {
@@ -146,11 +202,13 @@ fn sync_paint_preview(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
+                hit.block,
                 hit.position,
                 hit.normal,
                 face_size,
                 bias,
                 preview_tint,
+                &block_globals,
             );
         }
     }
@@ -160,11 +218,13 @@ fn spawn_face_overlay(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    block: Entity,
     face_center: Vec3,
     face_normal: Vec3,
     face_size: f32,
     bias: f32,
     color: Color,
+    block_globals: &Query<&GlobalTransform, With<PlacedBlock>>,
 ) {
     let half = face_size * 0.5;
     let mesh = meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(half)));
@@ -175,7 +235,7 @@ fn spawn_face_overlay(
         double_sided: true,
         ..default()
     });
-    let transform = face_transform_world(face_center, face_normal, bias);
+    let transform = face_overlay_transform(block_globals, block, face_center, face_normal, bias, 0);
     commands.spawn((
         PaintPreview,
         Mesh3d(mesh),
@@ -229,7 +289,15 @@ fn handle_face_paint(
     let bias = grid.grid_size * 0.025;
     let face_size = grid.grid_size * 0.98;
     let brush = stamp_painter.brush_color_bevy();
-    let world_transform = face_transform_world(hit.position, hit.normal, bias);
+    let rotation_quarters = stamp_painter.stamp_rotation_quarters;
+    let world_transform = face_overlay_transform(
+        &block_globals,
+        hit.block,
+        hit.position,
+        hit.normal,
+        bias,
+        rotation_quarters,
+    );
 
     clear_face_paint(&mut commands, &decals, hit.block, hit.normal);
 
@@ -244,9 +312,11 @@ fn handle_face_paint(
             world_transform,
             brush,
             hit.block,
+            rotation_quarters,
         );
         FacePaintKind::Stamp {
             stamp: stamp_painter.stamp.clone(),
+            rotation_quarters,
         }
     } else {
         spawn_solid_face_decal(
@@ -269,6 +339,7 @@ fn handle_face_paint(
             face_normal: hit.normal,
             face_size,
             bias,
+            stamp_rotation_quarters: rotation_quarters,
             kind,
         },
     });
@@ -290,7 +361,13 @@ pub fn apply_face_paint_snapshot(
     };
     let face_center =
         block_face_center(block_global.translation(), snapshot.face_size, snapshot.face_normal);
-    let world_transform = face_transform_world(face_center, snapshot.face_normal, snapshot.bias);
+    let world_transform = face_transform_world(
+        face_center,
+        snapshot.face_normal,
+        block_global.rotation(),
+        snapshot.bias,
+        snapshot.stamp_rotation_quarters,
+    );
 
     match &snapshot.kind {
         FacePaintKind::Solid => {
@@ -305,7 +382,7 @@ pub fn apply_face_paint_snapshot(
                 snapshot.color,
             );
         }
-        FacePaintKind::Stamp { stamp } => {
+        FacePaintKind::Stamp { stamp, .. } => {
             spawn_stamp_decal(
                 commands,
                 meshes,
@@ -316,6 +393,7 @@ pub fn apply_face_paint_snapshot(
                 world_transform,
                 snapshot.color,
                 snapshot.parent_block,
+                snapshot.stamp_rotation_quarters,
             );
         }
     }
@@ -336,6 +414,7 @@ pub fn delete_face_decal_with_undo(
             face_normal: decal.face_normal,
             face_size: grid.grid_size * 0.98,
             bias: grid.grid_size * 0.025,
+            stamp_rotation_quarters: decal.stamp_rotation_quarters,
             kind: decal.kind.clone(),
         },
     });
@@ -405,6 +484,7 @@ fn spawn_solid_face_decal(
             face_normal,
             parent_block,
             kind: FacePaintKind::Solid,
+            stamp_rotation_quarters: 0,
         },
         Mesh3d(mesh),
         MeshMaterial3d(material),
@@ -432,7 +512,17 @@ pub fn apply_blueprint_face_paint(
     let face_size = grid_size * 0.98;
     let bias = grid_size * 0.025;
     let face_center = block_face_center(block_center, grid_size, face_normal);
-    let world_transform = face_transform_world(face_center, face_normal, bias);
+    let rotation_quarters = match &paint.kind {
+        FacePaintKind::Stamp { rotation_quarters, .. } => *rotation_quarters,
+        FacePaintKind::Solid => 0,
+    };
+    let world_transform = face_transform_world(
+        face_center,
+        face_normal,
+        block_rotation,
+        bias,
+        rotation_quarters,
+    );
 
     match &paint.kind {
         FacePaintKind::Solid => {
@@ -447,7 +537,7 @@ pub fn apply_blueprint_face_paint(
                 brush,
             );
         }
-        FacePaintKind::Stamp { stamp } => {
+        FacePaintKind::Stamp { stamp, .. } => {
             spawn_stamp_decal(
                 commands,
                 meshes,
@@ -458,6 +548,7 @@ pub fn apply_blueprint_face_paint(
                 world_transform,
                 brush,
                 block_entity,
+                rotation_quarters,
             );
         }
     }

@@ -14,6 +14,21 @@ use crate::{
     ui::{GameplayAfterUi, UiInputCapture},
 };
 
+fn clear_placeable_ghost(
+    commands: &mut Commands,
+    ghosts: &Query<Entity, With<GhostPreview>>,
+    placement: &mut PlacementState,
+) {
+    if placement.ghost_entity.is_none() && ghosts.is_empty() {
+        placement.clear_ghost_cache();
+        return;
+    }
+    for entity in ghosts.iter() {
+        commands.entity(entity).despawn();
+    }
+    placement.clear_ghost_cache();
+}
+
 pub struct PlaceablesPlugin;
 
 impl Plugin for PlaceablesPlugin {
@@ -95,35 +110,35 @@ fn sync_placeable_ghost(
     ghosts: Query<Entity, With<GhostPreview>>,
     mut placement: ResMut<PlacementState>,
 ) {
-    let show = *mode == GameMode::Play
-        && placement.selected_placeable.is_some()
-        && placement.anchor_cell.is_some();
-
-    if !show {
-        if placement.ghost_entity.is_some() {
-            for entity in &ghosts {
-                commands.entity(entity).despawn();
-            }
-            placement.ghost_entity = None;
-        }
+    if *mode != GameMode::Play {
         return;
     }
 
-    let Some(placeable_id) = placement.selected_placeable.as_ref() else {
+    let show = placement.selected_placeable.is_some() && placement.anchor_cell.is_some();
+
+    if !show {
+        clear_placeable_ghost(&mut commands, &ghosts, &mut placement);
+        return;
+    }
+
+    let Some(placeable_id) = placement.selected_placeable.clone() else {
         return;
     };
-    let Some(def) = registry.get(placeable_id) else {
+    let Some(def) = registry.get(&placeable_id) else {
         return;
     };
+    let placeable_key = placeable_id.0.clone();
+
+    if let Some(sig) = placement.placeable_ghost_signature(&placeable_key) {
+        if placement.ghost_signature == Some(sig) && placement.ghost_entity.is_some() {
+            return;
+        }
+    }
+
+    clear_placeable_ghost(&mut commands, &ghosts, &mut placement);
 
     let cell = placement.anchor_cell.unwrap();
     let world_pos = grid.grid_to_world(cell);
-
-    // Rebuild ghost when target moves.
-    for entity in &ghosts {
-        commands.entity(entity).despawn();
-    }
-    placement.ghost_entity = None;
 
     let ghost_material = materials.add(StandardMaterial {
         base_color: Color::srgba(0.85, 0.55, 0.35, 0.45),
@@ -154,6 +169,7 @@ fn sync_placeable_ghost(
     };
 
     placement.ghost_entity = Some(entity);
+    placement.ghost_signature = placement.placeable_ghost_signature(&placeable_key);
 }
 
 fn handle_placeable_placement(

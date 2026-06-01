@@ -15,7 +15,11 @@ pub struct PlacedBlockSnapshot {
 #[serde(tag = "paintType", rename_all = "camelCase")]
 pub enum FacePaintKind {
     Solid,
-    Stamp { stamp: Stamp },
+    Stamp {
+        stamp: Stamp,
+        #[serde(default)]
+        rotation_quarters: i32,
+    },
 }
 
 #[derive(Clone)]
@@ -25,6 +29,7 @@ pub struct FacePaintSnapshot {
     pub face_normal: Vec3,
     pub face_size: f32,
     pub bias: f32,
+    pub stamp_rotation_quarters: i32,
     pub kind: FacePaintKind,
 }
 

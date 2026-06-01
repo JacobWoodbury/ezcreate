@@ -6,12 +6,6 @@ use super::PlayCharacterId;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PlaceableId(pub String);
 
-impl PlaceableId {
-    pub fn player_character() -> Self {
-        Self("player_character".into())
-    }
-}
-
 /// What to spawn when a placeable is placed. Extend with new variants as needed.
 #[derive(Clone, Debug)]
 pub enum PlaceableKind {
@@ -26,21 +20,9 @@ pub struct PlaceableDef {
     pub kind: PlaceableKind,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct PlaceableRegistry {
     pub items: Vec<PlaceableDef>,
-}
-
-impl Default for PlaceableRegistry {
-    fn default() -> Self {
-        Self {
-            items: vec![PlaceableDef {
-                id: PlaceableId::player_character(),
-                label: "Player Character".into(),
-                kind: PlaceableKind::PlayCharacter(PlayCharacterId::default_character()),
-            }],
-        }
-    }
 }
 
 impl PlaceableRegistry {

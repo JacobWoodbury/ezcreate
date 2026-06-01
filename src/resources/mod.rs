@@ -3,6 +3,7 @@ mod game_mode;
 mod key_bindings;
 mod grid_config;
 mod occupancy;
+mod character_storage;
 mod paint_state;
 mod placeables;
 mod play_state;
@@ -21,8 +22,9 @@ pub use occupancy::OccupancyMap;
 pub use paint_state::{PaintFaceHit, PaintState};
 pub use placeables::{PlaceableDef, PlaceableId, PlaceableKind, PlaceableRegistry};
 pub use play_state::{
-    PlayCharacterId, PlayCharacterRegistry, PlaySession, PlaySessionSnapshot, PlaySessionStorage,
-    PlayUiActions, PlayWorldState, SpawnedCharacter,
+    sync_placeables_from_characters, PlayCharacterDraft, PlayCharacterEditor, PlayCharacterId,
+    PlayCharacterPreset, PlayCharacterRegistry, PlaySession, PlaySessionSnapshot,
+    PlaySessionStorage, PlayUiActions, PlayWorldState, SpawnedCharacter,
 };
 pub use placement_state::{ActiveSection, PlacementState};
 pub use preferences::GamePreferences;

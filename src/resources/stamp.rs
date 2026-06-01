@@ -60,6 +60,8 @@ pub struct StampPainter {
     /// True while the user is in "apply" sub-mode (clicking blocks).
     /// False = editing the stamp grid; True = applying to faces.
     pub apply_mode: bool,
+    /// Rotation applied to the stamp on block faces, in 90° steps (Q/E in Paint mode).
+    pub stamp_rotation_quarters: i32,
 }
 
 impl Default for StampPainter {
@@ -69,6 +71,7 @@ impl Default for StampPainter {
             brush_color: [220, 80, 60, 255],
             saved_stamps: Vec::new(),
             apply_mode: true,
+            stamp_rotation_quarters: 0,
         }
     }
 }
@@ -82,6 +85,14 @@ impl StampPainter {
     /// True when the stamp grid should be applied to faces (any opaque pixel).
     pub fn apply_uses_stamp_grid(&self) -> bool {
         !self.stamp_is_empty()
+    }
+
+    pub fn rotate_stamp_cw(&mut self) {
+        self.stamp_rotation_quarters = (self.stamp_rotation_quarters + 1).rem_euclid(4);
+    }
+
+    pub fn rotate_stamp_ccw(&mut self) {
+        self.stamp_rotation_quarters = (self.stamp_rotation_quarters - 1).rem_euclid(4);
     }
 
     pub fn brush_color_bevy(&self) -> Color {

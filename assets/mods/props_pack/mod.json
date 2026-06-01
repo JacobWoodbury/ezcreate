@@ -1,0 +1,30 @@
+{
+  "id": "props_pack",
+  "name": "Props Pack",
+  "items": [
+    {
+      "id": "bush",
+      "displayName": "Bush",
+      "scenePath": "scenes/unit_cube.glb",
+      "sectionSpecPath": "sections/bush.json",
+      "thumbnailPath": "thumbnails/bush.png",
+      "category": "Nature"
+    },
+    {
+      "id": "fence_section",
+      "displayName": "Fence Section",
+      "scenePath": "scenes/unit_cube.glb",
+      "sectionSpecPath": "sections/fence_section.json",
+      "thumbnailPath": "thumbnails/fence_section.png",
+      "category": "Structures"
+    },
+    {
+      "id": "small_car",
+      "displayName": "Small Car",
+      "scenePath": "scenes/unit_cube.glb",
+      "sectionSpecPath": "sections/small_car.json",
+      "thumbnailPath": "thumbnails/small_car.png",
+      "category": "Vehicles"
+    }
+  ]
+}

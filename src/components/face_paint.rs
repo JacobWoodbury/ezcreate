@@ -10,4 +10,5 @@ pub struct FacePaintDecal {
     /// Block this decal belongs to (decals live in world space, not as mesh children).
     pub parent_block: Entity,
     pub kind: FacePaintKind,
+    pub stamp_rotation_quarters: i32,
 }
