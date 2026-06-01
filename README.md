@@ -1,6 +1,6 @@
 # ezcreate (Bevy)
 
-Townscaper-style modular building sandbox — Bevy port of the Godot **builder** project.
+Townscaper-style modular building sandbox
 
 ## New here?
 
